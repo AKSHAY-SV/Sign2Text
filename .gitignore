@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Environment secrets
+.env
+.env.*
+
+# Dataset and generated data
+SignDB/
+data/
+dataset/
+datasets/
+
+# Training outputs and checkpoints
+checkpoints/
+runs/
+logs/
+*.ckpt
+*.checkpoint
+
+# Keep the trained model out of Git if it is too large
+# Remove these exclusions if you intentionally want to version the models
+models/*.h5
+models/*.keras
+models/*.pt
+models/*.pth
+models/*.onnx
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
