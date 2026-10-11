@@ -107,7 +107,7 @@ SHOW_FPS = True
 SHOW_CONFIDENCE = True
 SHOW_PREDICTION = True
 SHOW_TEXT_BUFFER = True
-MIRROR_FEED = True
+MIRROR_FEED = False
 SHOW_LANDMARKS = True  # Show hand landmark skeleton overlay
 
 # =============================================================================

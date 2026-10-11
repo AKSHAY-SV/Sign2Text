@@ -150,12 +150,16 @@ def main() -> None:
     )
 
     # Load the CNN classifier for sign recognition.
-    cnn_model_path = str(MODELS_DIR / "sign_cnn.h5")
+    cnn_model_path = str(
+        MODELS_DIR / "candidate_asl_letters_v2" / "best.keras"
+    )
     cnn_classifier = None
     if Path(cnn_model_path).is_file():
         try:
             cnn_classifier = CnnClassifier(model_path=cnn_model_path)
-            metadata_path = MODELS_DIR / "metadata.json"
+            metadata_path = (
+                MODELS_DIR / "candidate_asl_letters_v2" / "metadata.json"
+            )
             if metadata_path.is_file():
                 cnn_classifier.load_metadata(str(metadata_path))
         except (OSError, ValueError, RuntimeError) as exc:
