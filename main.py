@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 from math import floor, ceil
 from pathlib import Path
+import time
 
 import cv2
 import numpy as np
@@ -24,6 +26,7 @@ from src.model.cnn_classifier import CnnClassifier, preprocess_image
 
 
 WINDOW = "Sign2Text"
+CAPTURE_CLASSES = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + ["del", "nothing", "space"]
 REFERENCE_CONFIDENCE_THRESHOLD = 0.80
 REFERENCE_STABLE_FRAMES = 12
 
@@ -70,6 +73,36 @@ def _compose(frame: np.ndarray, diagnostic: bool, crop: np.ndarray | None,
     return camera_view
 
 
+def _save_labeled_crop(crop_bgr: np.ndarray, label: str, capture_dir: Path,
+                       model_dir: Path, geometry, input_rgb: np.ndarray,
+                       scores: np.ndarray, class_names: list[str]) -> Path:
+    """Save the exact unmirrored BGR hand ROI used by the selected CNN path."""
+    if label not in class_names:
+        raise ValueError(f"Capture label {label!r} is absent from model metadata.")
+    label_dir = capture_dir / label
+    label_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S") + f"_{time.time_ns() % 1_000_000_000:09d}"
+    image_path = label_dir / f"{stamp}.png"
+    if not cv2.imwrite(str(image_path), crop_bgr):
+        raise OSError(f"Could not save webcam hand crop to {image_path}")
+    top = np.argsort(scores)[-3:][::-1]
+    report = {
+        "true_label": label,
+        "model_dir": str(model_dir.resolve()),
+        "source_crop_shape_bgr": list(crop_bgr.shape),
+        "model_input_shape_rgb": list(input_rgb.shape),
+        "model_input_dtype": str(input_rgb.dtype),
+        "crop_bounds_ltrb": list(geometry.bounds),
+        "landmark_bounds_ltrb": list(geometry.landmark_bounds),
+        "top3": [
+            {"class": class_names[int(index)], "score": float(scores[index])}
+            for index in top
+        ],
+    }
+    image_path.with_suffix(".json").write_text(json.dumps(report, indent=2))
+    return image_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--diagnostic", action="store_true",
@@ -82,7 +115,14 @@ def main() -> None:
                              help="load a Keras model and matching metadata from this directory")
     parser.add_argument("--show-landmarks", action="store_true",
                         help="draw landmarks on the preview copy (never on classifier input)")
+    parser.add_argument("--capture-label", choices=CAPTURE_CLASSES,
+                        help="label to assign to hand crops saved with S (requires a CNN model)")
+    parser.add_argument("--capture-dir", type=Path, default=Path("/tmp/sign2text_webcam_crops"),
+                        help="root directory for labeled crops saved with S")
     args = parser.parse_args()
+
+    if args.capture_label and not (args.model_dir or args.candidate_fallback):
+        parser.error("--capture-label requires --model-dir or --candidate-fallback")
 
     candidate = None
     if args.candidate_fallback or args.model_dir:
@@ -111,7 +151,7 @@ def main() -> None:
         min_consistent_predictions=REFERENCE_STABLE_FRAMES,
         confirmation_hold_seconds=0.0,
     )
-    print("ENTER capture confirmed class | SPACE separator | BACKSPACE delete | C clear | Q/close quit")
+    print("ENTER capture confirmed class | SPACE separator | BACKSPACE delete | C clear | S save labeled crop | Q/close quit")
 
     crop = input_rgb = scores = geometry = None
     raw_label = None
@@ -216,6 +256,16 @@ def main() -> None:
             elif key in (ord("c"), ord("C")):
                 buffer.clear()
                 stabilizer.rearm()
+            elif key in (ord("s"), ord("S")) and args.capture_label:
+                if candidate is None or crop is None or input_rgb is None or scores is None or geometry is None:
+                    print("No valid hand crop to save.")
+                else:
+                    image_path = _save_labeled_crop(
+                        crop, args.capture_label, args.capture_dir,
+                        candidate.model_path.parent, geometry, input_rgb,
+                        scores, class_names,
+                    )
+                    print(f"Saved labeled {args.capture_label} webcam crop: {image_path}")
 
             try:
                 if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:

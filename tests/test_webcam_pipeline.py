@@ -11,7 +11,7 @@ from src.model.cnn_classifier import CnnClassifier, CLASS_NAMES, preprocess_imag
 from src.prediction.predictor import PredictionStabilizer, RealTimePredictor
 from src.vision.display import to_display_uint8
 from src.vision.hand_crop import crop_hand_square
-from main import _compose, _insert
+from main import _compose, _insert, _save_labeled_crop
 from src.reference_recognizer import ReferenceSignRecognizer, preprocess_hand
 from src.text.buffer import TextBuffer
 
@@ -108,6 +108,35 @@ def test_main_has_one_application_window_and_reference_default():
     assert cv_calls.count("imshow") == 1
     assert "ReferenceSignRecognizer()" in source
     assert "--candidate-fallback" in source and "--model-dir" in source
+    assert "--capture-label" in source and "_save_labeled_crop(" in source
+
+
+def test_labeled_webcam_capture_saves_the_actual_bgr_crop_and_geometry(tmp_path):
+    from types import SimpleNamespace
+
+    crop = np.zeros((24, 18, 3), dtype=np.uint8)
+    crop[:] = (11, 77, 203)
+    model_input = np.full((64, 64, 3), 0.4, dtype=np.float32)
+    scores = np.zeros(len(CLASS_NAMES), dtype=np.float32)
+    scores[21] = 0.7
+    scores[22] = 0.2
+    scores[10] = 0.1
+    geometry = SimpleNamespace(bounds=(20, 30, 38, 54),
+                               landmark_bounds=(22, 32, 36, 52))
+
+    saved = _save_labeled_crop(
+        crop, "V", tmp_path / "webcam-crops", CANDIDATE, geometry,
+        model_input, scores, CLASS_NAMES,
+    )
+
+    assert saved.parent.name == "V"
+    np.testing.assert_array_equal(cv2.imread(str(saved)), crop)
+    report = json.loads(saved.with_suffix(".json").read_text())
+    assert report["true_label"] == "V"
+    assert report["crop_bounds_ltrb"] == [20, 30, 38, 54]
+    assert report["landmark_bounds_ltrb"] == [22, 32, 36, 52]
+    assert report["model_input_shape_rgb"] == [64, 64, 3]
+    assert report["top3"][0]["class"] == "V"
 
 
 def test_duplicate_aware_split_keeps_exact_duplicates_on_one_side(tmp_path):
