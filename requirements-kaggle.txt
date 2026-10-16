@@ -1,0 +1,6 @@
+# Kaggle GPU notebooks usually include TensorFlow, NumPy, OpenCV and scikit-learn.
+# Install only if one is missing or incompatible with train_cnn.py.
+tensorflow>=2.15
+numpy>=1.24
+opencv-python-headless>=4.8
+scikit-learn>=1.3

@@ -8,12 +8,24 @@ env/
 # Environment secrets
 .env
 .env.*
+credentials/
+secrets/
+*.pem
+*.key
+*service-account*.json
+*credentials*.json
+/kaggle.json
 
 # Dataset and generated data
 SignDB/
 data/
 dataset/
 datasets/
+/webcam_crops/
+/diagnostic_crops/
+/webcam_samples/
+/captures/
+/reports/*_eval/
 
 # Training outputs and checkpoints
 checkpoints/
@@ -29,6 +41,15 @@ models/*.keras
 models/*.pt
 models/*.pth
 models/*.onnx
+models/**/*.keras
+models/**/*.h5
+models/**/*.onnx
+models/**/*.pt
+models/**/*.pth
+models/asl_webcam_candidate/
+*.tfevents.*
+*.tfrecord
+*.tfrecord-*
 
 # Editor and OS files
 .vscode/

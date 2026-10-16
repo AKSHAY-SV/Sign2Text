@@ -7,6 +7,7 @@ currently deployed model. Images are RGB, resized to a square, and scaled to
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import random
 import time
@@ -18,8 +19,10 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.model_selection import StratifiedGroupKFold
 
 from config.settings import DATASET_DIR, MODELS_DIR
+from src.model.image_preprocessing import NORMALIZATION, RESIZE_METHOD, preprocess_rgb_tensor
 
 LETTERS = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 SPECIAL = ["del", "nothing", "space"]
@@ -32,9 +35,13 @@ def set_seed(seed: int = SEED) -> None:
     random.seed(seed)
     np.random.seed(seed)
     tf.keras.utils.set_random_seed(seed)
+    try:
+        tf.config.experimental.enable_op_determinism()
+    except (AttributeError, RuntimeError):
+        pass
 
 
-def audit_dataset(root: Path, cache_path: Path | None = None) -> tuple[list[str], dict[str, list[Path]], dict[str, int]]:
+def audit_dataset(root: Path, cache_path: Path | None = None) -> tuple[list[str], dict[str, list[Path]], dict[str, int], dict[str, int]]:
     if not root.is_dir():
         raise FileNotFoundError(f"Dataset directory not found: {root}")
     class_dirs = sorted(p for p in root.iterdir() if p.is_dir())
@@ -43,30 +50,35 @@ def audit_dataset(root: Path, cache_path: Path | None = None) -> tuple[list[str]
         raise ValueError(f"Expected classes {EXPECTED_CLASSES}; found {classes}")
     files: dict[str, list[Path]] = {}
     invalid: dict[str, int] = {}
+    dimensions: dict[str, int] = {}
     import cv2
     fingerprint = []
+    files_by_dir = {}
     for directory in class_dirs:
-        items = [p for p in directory.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS]
-        fingerprint.append((directory.name, len(items), sum(p.stat().st_size for p in items),
-                            max((p.stat().st_mtime_ns for p in items), default=0)))
+        items = sorted(p for p in directory.iterdir()
+                       if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS)
+        files_by_dir[directory.name] = items
+        fingerprint.append([directory.name, [[p.name, p.stat().st_size, p.stat().st_mtime_ns]
+                                             for p in items]])
     if cache_path and cache_path.is_file():
         try:
             cached = json.loads(cache_path.read_text())
             if cached.get("fingerprint") == fingerprint:
                 cached_files = {name: [Path(p) for p in paths] for name, paths in cached["files"].items()}
                 if all(all(p.is_file() for p in paths) for paths in cached_files.values()):
-                    return classes, cached_files, cached["invalid"]
+                    if "dimensions" in cached:
+                        return classes, cached_files, cached["invalid"], cached["dimensions"]
         except (OSError, ValueError, KeyError, TypeError):
             pass
     for directory in class_dirs:
         good, bad = [], 0
-        for path in sorted(directory.iterdir()):
-            if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
-                continue
+        for path in files_by_dir[directory.name]:
             try:
                 image = cv2.imread(str(path), cv2.IMREAD_COLOR)
                 if image is None or image.ndim != 3 or image.shape[2] != 3:
                     raise ValueError("not a decodable color image")
+                shape = f"{image.shape[1]}x{image.shape[0]}"
+                dimensions[shape] = dimensions.get(shape, 0) + 1
                 good.append(path)
             except (OSError, ValueError):
                 bad += 1
@@ -78,28 +90,106 @@ def audit_dataset(root: Path, cache_path: Path | None = None) -> tuple[list[str]
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps({"fingerprint": fingerprint,
                                           "files": {k: [str(p) for p in v] for k, v in files.items()},
-                                          "invalid": invalid}))
-    return classes, files, invalid
+                                          "invalid": invalid, "dimensions": dimensions}))
+    return classes, files, invalid, dimensions
 
 
 def split_files(files: dict[str, list[Path]], validation_split: float, seed: int,
                 max_per_class: int | None = None):
-    rng = random.Random(seed)
-    train_paths, train_labels, val_paths, val_labels = [], [], [], []
+    """Deterministically stratify while keeping perceptual duplicate groups intact."""
+    if not 0.05 <= validation_split <= 0.5:
+        raise ValueError("validation_split must be between 0.05 and 0.5")
     classes = list(files)
+    paths, labels = [], []
+    rng = random.Random(seed)
     for class_index, name in enumerate(classes):
         choices = list(files[name])
         rng.shuffle(choices)
         if max_per_class is not None:
             choices = choices[:max_per_class]
-        n_val = max(1, int(round(len(choices) * validation_split)))
-        val, train = choices[:n_val], choices[n_val:]
-        train_paths.extend(map(str, train)); train_labels.extend([class_index] * len(train))
-        val_paths.extend(map(str, val)); val_labels.extend([class_index] * len(val))
-    # Deterministic global train shuffle; validation remains stable for reports.
-    order = list(range(len(train_paths))); rng.shuffle(order)
-    return (np.asarray(train_paths)[order], np.asarray(train_labels, np.int32)[order],
-            np.asarray(val_paths), np.asarray(val_labels, np.int32), classes)
+        paths.extend(choices)
+        labels.extend([class_index] * len(choices))
+    paths = np.asarray([str(p) for p in paths])
+    labels = np.asarray(labels, dtype=np.int32)
+    groups, duplicate_stats = perceptual_duplicate_groups(paths, seed)
+    n_splits = max(2, min(20, int(round(1.0 / validation_split))))
+    splitter = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    train_indices, val_indices = next(splitter.split(paths, labels, groups))
+    return (paths[train_indices], labels[train_indices], paths[val_indices],
+            labels[val_indices], classes, duplicate_stats)
+
+
+def perceptual_duplicate_groups(paths: np.ndarray, seed: int = SEED,
+                                 max_hamming_distance: int = 2):
+    """Group exact/near duplicate images using DCT perceptual hashes.
+
+    Three disjoint hash bands guarantee that hashes at Hamming distance <=2
+    share at least one bucket. Candidate pairs are then checked exactly. This
+    avoids the quadratic all-pairs comparison on Kaggle-sized datasets.
+    """
+    import cv2
+
+    n = len(paths)
+    parent = list(range(n))
+    rank = [0] * n
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            return
+        if rank[ra] < rank[rb]:
+            ra, rb = rb, ra
+        parent[rb] = ra
+        if rank[ra] == rank[rb]:
+            rank[ra] += 1
+
+    buckets: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    hashes = []
+    invalid = 0
+    # 21/21/22-bit partition: distance <=2 must leave one complete band equal.
+    bands = ((0, 21), (21, 21), (42, 22))
+    for index, path in enumerate(paths):
+        image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if image is None:
+            invalid += 1
+            value = index  # shouldn't occur after audit; never group bad paths
+            hashes.append(value)
+            continue
+        small = cv2.resize(image, (32, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
+        dct = cv2.dct(small)[:8, :8].reshape(-1)
+        median = float(np.median(dct[1:]))
+        value = 0
+        for bit, coefficient in enumerate(dct):
+            if coefficient > median:
+                value |= 1 << bit
+        hashes.append(value)
+        candidates: set[int] = set()
+        for band_index, (offset, width) in enumerate(bands):
+            key_bits = (value >> offset) & ((1 << width) - 1)
+            candidates.update(other for other, _ in buckets.get((band_index, key_bits), ()))
+        for other in candidates:
+            if (value ^ hashes[other]).bit_count() <= max_hamming_distance:
+                union(index, other)
+        for band_index, (offset, width) in enumerate(bands):
+            key_bits = (value >> offset) & ((1 << width) - 1)
+            buckets.setdefault((band_index, key_bits), []).append((index, value))
+    roots = [find(i) for i in range(n)]
+    root_to_group = {root: group for group, root in enumerate(sorted(set(roots)))}
+    group_ids = np.asarray([root_to_group[root] for root in roots], dtype=np.int64)
+    _, counts = np.unique(group_ids, return_counts=True)
+    stats = {
+        "algorithm": "64-bit DCT pHash, Hamming distance <= 2, stratified group split",
+        "seed": int(seed), "near_duplicate_groups": int(np.count_nonzero(counts > 1)),
+        "images_in_duplicate_groups": int(counts[counts > 1].sum()) if np.any(counts > 1) else 0,
+        "unique_groups": int(len(counts)), "invalid_hash_inputs": int(invalid),
+    }
+    return group_ids, stats
 
 
 def make_dataset(paths, labels, image_size: int, batch_size: int, training: bool,
@@ -112,8 +202,7 @@ def make_dataset(paths, labels, image_size: int, batch_size: int, training: bool
         raw = tf.io.read_file(path)
         image = tf.io.decode_image(raw, channels=3, expand_animations=False)
         image.set_shape([None, None, 3])
-        image = tf.image.resize(image, [image_size, image_size], antialias=True)
-        image = tf.cast(image, tf.float32) / 255.0
+        image = preprocess_rgb_tensor(image, image_size)
         return image, label
 
     options = tf.data.Options()
@@ -124,9 +213,11 @@ def make_dataset(paths, labels, image_size: int, batch_size: int, training: bool
 
 def build_model(image_size: int, num_classes: int, learning_rate: float):
     inputs = keras.Input((image_size, image_size, 3), name="rgb_image_01")
-    x = layers.RandomFlip("horizontal")(inputs)
-    x = layers.RandomRotation(0.06, fill_mode="reflect")(x)
-    x = layers.RandomZoom(0.08, fill_mode="reflect")(x)
+    # No horizontal flips: mirrored hand orientation may alter sign appearance.
+    x = layers.RandomRotation(0.04, fill_mode="reflect")(inputs)
+    x = layers.RandomTranslation(0.04, 0.04, fill_mode="reflect")(x)
+    x = layers.RandomZoom(0.06, fill_mode="reflect")(x)
+    x = layers.RandomContrast(0.10)(x)
     x = layers.Conv2D(24, 3, padding="same", use_bias=False)(x)
     x = layers.BatchNormalization()(x); x = layers.Activation("relu")(x)
     x = layers.MaxPooling2D()(x)
@@ -146,14 +237,16 @@ def build_model(image_size: int, num_classes: int, learning_rate: float):
 
 def train(args) -> dict[str, Any]:
     set_seed(args.seed)
-    classes, files, invalid = audit_dataset(args.dataset, args.output_dir / "dataset_audit.json")
+    classes, files, invalid, source_dimensions = audit_dataset(
+        args.dataset, args.output_dir / "dataset_audit.json")
     counts = {name: len(files[name]) for name in classes}
     print(f"Dataset: {sum(counts.values())} valid images; classes={classes}")
     print(f"Invalid image counts: {invalid}")
     max_per_class = args.smoke_per_class if args.smoke else None
-    trp, trl, vap, val, class_names = split_files(
+    trp, trl, vap, val, class_names, duplicate_stats = split_files(
         files, args.validation_split, args.seed, max_per_class)
-    print(f"Split: {len(trp)} train, {len(vap)} validation; GPU={tf.config.list_physical_devices('GPU')}")
+    print(f"Split: {len(trp)} train, {len(vap)} validation; {duplicate_stats}")
+    print(f"GPU devices: {tf.config.list_physical_devices('GPU')}")
     train_ds = make_dataset(trp, trl, args.image_size, args.batch_size, True, args.seed)
     val_ds = make_dataset(vap, val, args.image_size, args.batch_size, False, args.seed)
 
@@ -162,10 +255,10 @@ def train(args) -> dict[str, Any]:
     best_path = out / "best.keras"
     model = build_model(args.image_size, len(class_names), args.learning_rate)
     cb = [
-        keras.callbacks.ModelCheckpoint(str(best_path), monitor="val_accuracy",
-                                        save_best_only=True, mode="max", verbose=1),
-        keras.callbacks.EarlyStopping(monitor="val_accuracy", patience=args.patience,
-                                      restore_best_weights=True, mode="max", verbose=1),
+        keras.callbacks.ModelCheckpoint(str(best_path), monitor="val_loss",
+                                        save_best_only=True, mode="min", verbose=1),
+        keras.callbacks.EarlyStopping(monitor="val_loss", patience=args.patience,
+                                      restore_best_weights=True, mode="min", verbose=1),
         keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=2,
                                           min_lr=1e-5, verbose=1),
     ]
@@ -185,23 +278,34 @@ def train(args) -> dict[str, Any]:
     # Keep all training artifacts isolated. Caller may promote best.keras only
     # after review; existing models/sign_cnn.h5 is never overwritten here.
     cm_path = out / "confusion_matrix.csv"
-    np.savetxt(cm_path, cm, delimiter=",", fmt="%d",
-               header=",".join(class_names), comments="")
+    with cm_path.open("w", newline="") as matrix_file:
+        writer = csv.writer(matrix_file)
+        writer.writerow(["true\\pred", *class_names])
+        writer.writerows([name, *row.tolist()] for name, row in zip(class_names, cm))
     report_path = out / "classification_report.json"
     report_path.write_text(json.dumps(report, indent=2))
     metadata = {
         "model_version": "2.0.0", "dataset": str(args.dataset.resolve()),
         "image_size": args.image_size, "input_shape": [args.image_size, args.image_size, 3],
+        "source_image_dimensions": source_dimensions,
+        "model_input_dimensions": [args.image_size, args.image_size, 3],
         "num_classes": len(class_names), "class_names": class_names,
         "class_to_idx": {name: i for i, name in enumerate(class_names)},
-        "color_order": "RGB", "normalization": "float32 pixel values divided by 255, range [0,1]",
-        "resize": "bilinear antialiased square resize", "augmentation": ["horizontal_flip", "rotation_0.06", "zoom_0.08"],
+        "color_order": "RGB",
+        "training_decoder_color_order": "RGB (TensorFlow decode_image)",
+        "webcam_source_color_order": "BGR (OpenCV), converted to RGB before model input",
+        "normalization": NORMALIZATION,
+        "resize": RESIZE_METHOD,
+        "augmentation": ["rotation_0.04", "translation_0.04", "zoom_0.06", "contrast_0.10"],
         "seed": args.seed, "validation_split": args.validation_split,
+        "effective_validation_fraction": float(len(vap) / (len(trp) + len(vap))),
+        "split_strategy": duplicate_stats,
         "train_samples": int(len(trp)), "validation_samples": int(len(vap)),
         "best_val_accuracy": float(val_acc), "best_val_loss": float(val_loss),
         "smoke_test": bool(args.smoke), "training_epochs_completed": len(history.history["loss"]),
         "trained_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "live_input_note": "Training uses centered dataset photos; live hand crop domain requires camera validation.",
+        "dynamic_sign_limitation": "J and Z require motion and cannot be reliably recognized from one static image.",
     }
     (out / "metadata.json").write_text(json.dumps(metadata, indent=2))
     print(f"Best validation accuracy={val_acc:.4f}; loss={val_loss:.4f}")
@@ -217,10 +321,10 @@ def train(args) -> dict[str, Any]:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=Path, default=DATASET_DIR)
-    parser.add_argument("--output-dir", type=Path, default=MODELS_DIR / "asl_letters_v2")
-    parser.add_argument("--image-size", type=int, default=96)
-    parser.add_argument("--batch-size", type=int, default=24)
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--output-dir", type=Path, default=MODELS_DIR / "asl_webcam_candidate")
+    parser.add_argument("--image-size", type=int, default=128)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--learning-rate", type=float, default=8e-4)
     parser.add_argument("--validation-split", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=SEED)

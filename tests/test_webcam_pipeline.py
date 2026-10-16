@@ -96,7 +96,31 @@ def test_main_has_one_application_window_and_reference_default():
     assert cv_calls.count("namedWindow") == 1
     assert cv_calls.count("imshow") == 1
     assert "ReferenceSignRecognizer()" in source
-    assert "--candidate-fallback" in source
+    assert "--candidate-fallback" in source and "--model-dir" in source
+
+
+def test_duplicate_aware_split_keeps_exact_duplicates_on_one_side(tmp_path):
+    import cv2
+    from train_cnn import split_files
+
+    rng = np.random.default_rng(87)
+    files = {"A": [], "B": []}
+    for class_name in files:
+        for index in range(12):
+            image = rng.integers(0, 256, (64, 64, 3), dtype=np.uint8)
+            path = tmp_path / f"{class_name}_{index}.png"
+            assert cv2.imwrite(str(path), image)
+            files[class_name].append(path)
+    duplicate = tmp_path / "A_duplicate.png"
+    assert cv2.imwrite(str(duplicate), cv2.imread(str(files["A"][0])))
+    files["A"].append(duplicate)
+
+    train_paths, _, val_paths, _, classes, stats = split_files(files, .2, 19)
+    train_set, val_set = set(train_paths), set(val_paths)
+    assert classes == ["A", "B"]
+    assert not (train_set & val_set)
+    assert (files["A"][0] in train_set) == (duplicate in train_set)
+    assert stats["near_duplicate_groups"] >= 1
 
 
 def test_preprocess_contract_and_horizontal_mirror():

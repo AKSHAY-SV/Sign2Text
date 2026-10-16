@@ -75,16 +75,25 @@ def main() -> None:
     parser.add_argument("--diagnostic", action="store_true",
                         help="show crop, exact model input and top-three scores inside the main window")
     parser.add_argument("--camera", type=int, default=CAMERA_INDEX)
-    parser.add_argument("--candidate-fallback", action="store_true",
-                        help="use the preserved project 64x64 candidate CNN instead of the reference recognizer")
+    model_group = parser.add_mutually_exclusive_group()
+    model_group.add_argument("--candidate-fallback", action="store_true",
+                             help="use the preserved project candidate CNN instead of the reference recognizer")
+    model_group.add_argument("--model-dir", type=Path,
+                             help="load a Keras model and matching metadata from this directory")
     parser.add_argument("--show-landmarks", action="store_true",
                         help="draw landmarks on the preview copy (never on classifier input)")
     args = parser.parse_args()
 
     candidate = None
-    if args.candidate_fallback:
-        model_dir = Path(__file__).resolve().parent / "models/candidate_asl_letters_v2"
+    if args.candidate_fallback or args.model_dir:
+        model_dir = (args.model_dir if args.model_dir else
+                     Path(__file__).resolve().parent / "models/candidate_asl_letters_v2")
         candidate = CnnClassifier(model_dir / "best.keras", model_dir / "metadata.json")
+        if (candidate.class_names != candidate.metadata.get("class_names")
+                or list(candidate.model.input_shape[1:]) != [candidate.image_size, candidate.image_size, 3]
+                or candidate.metadata.get("input_shape") != [candidate.image_size, candidate.image_size, 3]
+                or candidate.metadata.get("color_order") != "RGB"):
+            raise ValueError("Selected model and metadata preprocessing contract do not match.")
         class_names = candidate.class_names
         print(f"Fallback model: {candidate.model_path}\nMetadata: {candidate.metadata_path}")
     else:

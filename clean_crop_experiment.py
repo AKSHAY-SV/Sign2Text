@@ -24,21 +24,24 @@ from src.vision.hand_crop import crop_hand_with_bounds
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--camera", type=int, default=CAMERA_INDEX)
+    parser.add_argument("--model-dir", type=Path, default=Path("models/candidate_asl_letters_v2"),
+                        help="directory containing best.keras and its metadata.json")
     parser.add_argument("--show-landmarks", action="store_true")
     parser.add_argument("--diagnostic", action="store_true", help="show the exact model input and top-3 scores")
     parser.add_argument("--save-dir", type=Path, default=Path("/tmp/sign2text_diagnostic_crops"))
     args = parser.parse_args()
 
-    model_dir = Path("models/candidate_asl_letters_v2")
+    model_dir = args.model_dir
     classifier = CnnClassifier(model_dir / "best.keras", model_dir / "metadata.json")
     meta = classifier.metadata
-    if (classifier.image_size != 64 or classifier.class_names != meta["class_names"]
-            or classifier.num_classes != 29 or len(classifier.class_names) != 29
-            or list(classifier.model.input_shape[1:]) != [64, 64, 3]
-            or meta.get("input_shape") != [64, 64, 3]
+    expected_shape = [classifier.image_size, classifier.image_size, 3]
+    if (classifier.class_names != meta["class_names"]
+            or classifier.num_classes != len(classifier.class_names)
+            or list(classifier.model.input_shape[1:]) != expected_shape
+            or meta.get("input_shape") != expected_shape
             or meta.get("color_order") != "RGB"
             or meta.get("normalization") != "float32 pixel values divided by 255, range [0,1]"):
-        raise ValueError("Candidate model preprocessing or class metadata does not match the expected RGB contract.")
+        raise ValueError("Model preprocessing or class metadata does not match the expected RGB contract.")
     detector = HandDetector(model_path=str(MODEL_PATH), num_hands=1)
     camera = Webcam(camera_index=args.camera, width=CAMERA_WIDTH, height=CAMERA_HEIGHT, fps=CAMERA_FPS)
     buffer = TextBuffer()
@@ -67,7 +70,8 @@ def main() -> None:
             if last_geometry is not None:
                 last_crop = last_geometry.image
                 last_input = preprocess_image(last_crop, (classifier.image_size, classifier.image_size))
-                if last_input.shape != (64, 64, 3) or last_input.dtype != np.float32 or not np.isfinite(last_input).all() or last_input.min() < 0 or last_input.max() > 1:
+                expected_input_shape = (classifier.image_size, classifier.image_size, 3)
+                if last_input.shape != expected_input_shape or last_input.dtype != np.float32 or not np.isfinite(last_input).all() or last_input.min() < 0 or last_input.max() > 1:
                     raise ValueError("Invalid CNN input tensor contract.")
                 last_scores = classifier.predict_proba(last_input)
                 if (last_scores is None or last_scores.shape != (len(classifier.class_names),)

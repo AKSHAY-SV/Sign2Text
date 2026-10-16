@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import tensorflow as tf
 from tensorflow import keras
+from src.model.image_preprocessing import preprocess_rgb_tensor
 
 
 # =============================================================================
@@ -327,16 +328,8 @@ def preprocess_image(
     else:
         img_rgb = img_array
 
-    # Match train_cnn.make_dataset: bilinear interpolation with antialiasing.
-    # TensorFlow is already a required inference dependency for the CNN.
-    img_resized = tf.image.resize(
-        img_rgb, target_size, method="bilinear", antialias=True
-    ).numpy()
-
-    # Normalize to [0, 1]
-    img_normalized = img_resized.astype(np.float32) / 255.0
-
-    return img_normalized
+    # Exactly the same resize and normalization used by train_cnn.make_dataset.
+    return preprocess_rgb_tensor(tf.convert_to_tensor(img_rgb), target_size).numpy()
 
 
 # =============================================================================
