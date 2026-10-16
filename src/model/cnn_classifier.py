@@ -82,6 +82,7 @@ class CnnClassifier:
                 to load from default locations.
         """
         self.model: Optional[keras.Model] = None
+        explicit_metadata = metadata_path is not None
         self._model_input_size: Optional[int] = None
         self.image_size = DEFAULT_IMAGE_SIZE
         self.num_classes = NUM_CLASSES
@@ -89,10 +90,23 @@ class CnnClassifier:
         self.label_to_idx = CLASS_TO_IDX.copy()
         self.idx_to_label = INDEX_TO_CLASS.copy()
         self.metadata: Dict[str, Any] = {}
+        self._metadata_loaded = False
+        self.model_path: Optional[Path] = None
+        self.metadata_path: Optional[Path] = None
 
         # Try to load model and metadata
         if model_path is not None:
             self.load_model(str(model_path))
+            if explicit_metadata:
+                self.load_metadata(str(metadata_path))
+            elif self.model_path is not None:
+                sibling_metadata = self.model_path.parent / METADATA_FILENAME
+                if sibling_metadata.is_file():
+                    self.load_metadata(str(sibling_metadata))
+            if not self._metadata_loaded:
+                raise FileNotFoundError(
+                    f"Matching metadata file not found beside model: {self.model_path}"
+                )
         else:
             # Try default locations
             default_model = Path("models") / MODEL_FILENAME
@@ -117,6 +131,7 @@ class CnnClassifier:
 
         print(f"Loading model from {model_file}...")
         self.model = keras.models.load_model(model_file, compile=False)
+        self.model_path = model_file.resolve()
 
         # Update dimensions from the model if different
         if self.model.input_shape is not None:
@@ -148,6 +163,8 @@ class CnnClassifier:
         print(f"Loading metadata from {meta_file}...")
         with open(meta_file, "r") as f:
             metadata = json.load(f)
+        if not isinstance(metadata, dict):
+            raise ValueError("Model metadata must be a JSON object.")
         self.metadata = metadata
 
         # Update attributes from metadata
@@ -159,18 +176,30 @@ class CnnClassifier:
                     f"{self._model_input_size}."
                 )
             self.image_size = metadata_image_size
-        if "num_classes" in metadata:
-            self.num_classes = metadata["num_classes"]
+        metadata_num_classes = int(metadata.get("num_classes", len(self.class_names)))
+        if self.model is not None and self.model.output_shape[-1] != metadata_num_classes:
+            raise ValueError("Loaded model output dimension does not match metadata.")
+        self.num_classes = metadata_num_classes
         if "class_names" in metadata:
-            self.class_names = metadata["class_names"]
+            self.class_names = list(metadata["class_names"])
             if len(self.class_names) != self.num_classes:
                 raise ValueError("Metadata class_names length does not match num_classes.")
+        if len(set(self.class_names)) != len(self.class_names):
+            raise ValueError("Metadata class_names contains duplicates.")
+        expected_mapping = {name: i for i, name in enumerate(self.class_names)}
         if "class_to_idx" in metadata:
-            self.label_to_idx = metadata["class_to_idx"]
+            mapping = metadata["class_to_idx"]
+            if mapping != expected_mapping:
+                raise ValueError("Metadata class_to_idx does not match class_names order.")
+            self.label_to_idx = mapping
         if "idx_to_label" in metadata:
-            self.idx_to_label = {int(k): v for k, v in metadata["idx_to_label"].items()}
-        elif self.class_names:
-            self.idx_to_label = dict(enumerate(self.class_names))
+            index_mapping = {int(k): v for k, v in metadata["idx_to_label"].items()}
+            if index_mapping != dict(enumerate(self.class_names)):
+                raise ValueError("Metadata idx_to_label does not match class_names order.")
+        self.idx_to_label = dict(enumerate(self.class_names))
+        self.label_to_idx = expected_mapping
+        self.metadata_path = meta_file.resolve()
+        self._metadata_loaded = True
         if self.model is not None and self.model.output_shape[-1] != self.num_classes:
             raise ValueError("Loaded model output dimension does not match metadata.")
 
@@ -236,8 +265,18 @@ class CnnClassifier:
         if self.model is None:
             return None
 
+        if image.shape != (self.image_size, self.image_size, 3):
+            raise ValueError(
+                f"Expected image shape ({self.image_size}, {self.image_size}, 3), got {image.shape}."
+            )
+
         img_batch = np.expand_dims(image, axis=0).astype(np.float32)
-        return self.model.predict(img_batch, verbose=0)[0]
+        scores = self.model.predict(img_batch, verbose=0)[0]
+        if (scores.ndim != 1 or scores.size != self.num_classes
+                or not np.all(np.isfinite(scores)) or np.any(scores < 0)
+                or np.any(scores > 1) or not np.isclose(scores.sum(), 1.0, atol=1e-3)):
+            raise ValueError("Model output is not a normalized probability vector.")
+        return scores
 
     def get_model_info(self) -> Dict[str, any]:
         """Get information about the current model."""
@@ -288,9 +327,11 @@ def preprocess_image(
     else:
         img_rgb = img_array
 
-    # The training pipeline uses tf.image.resize with bilinear interpolation
-    # and antialiasing; use the matching OpenCV interpolation for this resize.
-    img_resized = cv2.resize(img_rgb, (target_size[1], target_size[0]), interpolation=cv2.INTER_AREA)
+    # Match train_cnn.make_dataset: bilinear interpolation with antialiasing.
+    # TensorFlow is already a required inference dependency for the CNN.
+    img_resized = tf.image.resize(
+        img_rgb, target_size, method="bilinear", antialias=True
+    ).numpy()
 
     # Normalize to [0, 1]
     img_normalized = img_resized.astype(np.float32) / 255.0

@@ -166,9 +166,8 @@ class TextBuffer:
 
         # If current word is empty but we have words, add a space separator
         # (this handles pressing space twice or space at start)
-        elif self._words:
-            # Append space to the last word instead of adding a new " " element
-            # This avoids double spaces when joining
+        elif self._words and not self._words[-1].endswith(" "):
+            # Keep repeated separator key presses idempotent.
             self._words[-1] += " "
 
     def backspace(self) -> Optional[str]:
@@ -198,8 +197,14 @@ class TextBuffer:
             if not self._current_word.strip():
                 self._current_word = ""
         elif self._words:
-            # Remove last word
-            removed_word = self._words.pop()
+            # A word separator does not change the meaning of backspace: it
+            # deletes one character, including when the current word is empty.
+            previous = self._words.pop()
+            if previous.endswith(" "):
+                previous = previous.rstrip()
+            if previous:
+                self._current_word = previous[:-1]
+                removed_word = previous if not self._current_word else None
 
         return removed_word
 

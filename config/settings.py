@@ -79,6 +79,10 @@ CROSS_VALIDATION_FOLDS = 5
 CONFIDENCE_THRESHOLD = 0.6
 STABLE_FRAMES = 5  # Number of consecutive frames with same prediction for debouncing
 DEBOUNCE_FRAMES = 5  # Alias for STABLE_FRAMES
+PROBABILITY_HISTORY_SIZE = 3  # CNN inference observations averaged for temporal smoothing
+MIN_CONSISTENT_PREDICTIONS = 3  # At 30fps / every third frame, about 0.2s of consistent evidence
+CONFIRMATION_HOLD_SECONDS = 0.20  # Wall-clock hold prevents behavior changing with inference cadence
+DIAGNOSTIC_LOG_INTERVAL_SECONDS = 1.0  # Limit terminal diagnostics to one line per second
 MAX_SAME_SIGN_REPEAT = 1  # Only output sign once per stable detection
 PREDICTION_COOLDOWN = 200  # Minimum ms between outputs of same sign
 

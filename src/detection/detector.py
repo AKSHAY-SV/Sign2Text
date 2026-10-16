@@ -73,6 +73,9 @@ class HandResult:
     confidence: float              # handedness classification score
     landmarks: List[Landmark3D]    # 21 normalized image-space landmarks
     world_landmarks: List[Landmark3D]  # 21 metric world-space landmarks
+    # Optional detector-provided hand box, normalized as (left, top, right, bottom).
+    # Tasks HandLandmarker versions without this field leave it unset.
+    bounding_box: Optional[tuple[float, float, float, float]] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -232,6 +235,19 @@ class HandDetector:
             top_category = (
                 handedness_categories[0] if handedness_categories else None
             )
+            box = None
+            # MediaPipe Tasks versions expose the palm detector's bounding box
+            # here. Keep this optional for compatibility with older versions.
+            # The installed Tasks HandLandmarker result has no hand bounding
+            # box field; retain this optional extension for compatible variants.
+            boxes = getattr(raw_result, "hand_rects", None)
+            if boxes and hand_index < len(boxes):
+                rect = boxes[hand_index]
+                try:
+                    left, top = float(rect.x_center - rect.width / 2), float(rect.y_center - rect.height / 2)
+                    box = (left, top, left + float(rect.width), top + float(rect.height))
+                except (AttributeError, TypeError, ValueError):
+                    box = None
             label = top_category.category_name if top_category else "Unknown"
             confidence = float(top_category.score) if top_category else 0.0
 
@@ -245,6 +261,7 @@ class HandDetector:
                     world_landmarks=[
                         Landmark3D(lm.x, lm.y, lm.z) for lm in world_landmarks
                     ],
+                    bounding_box=box,
                 )
             )
 
