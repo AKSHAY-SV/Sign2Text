@@ -16,4 +16,7 @@ def preprocess_rgb_tensor(image: tf.Tensor, image_size: int | tuple[int, int]) -
     if len(target) != 2 or min(target) <= 0:
         raise ValueError("image_size must be a positive int or (height, width) pair")
     image = tf.image.resize(image, target, method="bilinear", antialias=True)
-    return image / 255.0
+    # TensorFlow's resize kernel can overshoot the input extrema by a tiny
+    # floating-point amount (for example 255.00003). Keep the documented
+    # training/inference contract exactly within [0, 1].
+    return tf.clip_by_value(image / 255.0, 0.0, 1.0)

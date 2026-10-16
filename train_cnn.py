@@ -113,6 +113,13 @@ def split_files(files: dict[str, list[Path]], validation_split: float, seed: int
     labels = np.asarray(labels, dtype=np.int32)
     groups, duplicate_stats = perceptual_duplicate_groups(paths, seed)
     n_splits = max(2, min(20, int(round(1.0 / validation_split))))
+    unique_groups = np.unique(groups).size
+    if unique_groups < n_splits:
+        raise ValueError(
+            f"Cannot make a {n_splits}-fold duplicate-aware split from "
+            f"only {unique_groups} unique image groups; add more distinct "
+            "images per class or reduce validation_split."
+        )
     splitter = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
     train_indices, val_indices = next(splitter.split(paths, labels, groups))
     return (paths[train_indices], labels[train_indices], paths[val_indices],
@@ -211,6 +218,63 @@ def make_dataset(paths, labels, image_size: int, batch_size: int, training: bool
     return ds.map(load, num_parallel_calls=2).batch(batch_size).prefetch(1).with_options(options)
 
 
+def validate_training_labels(train_paths, train_labels, val_paths, val_labels,
+                             class_names: list[str]) -> None:
+    """Fail before fitting if split labels no longer match source class folders."""
+    if len(train_paths) != len(train_labels) or len(val_paths) != len(val_labels):
+        raise ValueError("Image path and label counts differ in the train/validation split.")
+    num_classes = len(class_names)
+    for side, paths, labels in (("training", train_paths, train_labels),
+                                ("validation", val_paths, val_labels)):
+        labels = np.asarray(labels)
+        if labels.ndim != 1 or len(labels) == 0:
+            raise ValueError(f"{side} split labels must be a non-empty 1-D array.")
+        if np.any(labels < 0) or np.any(labels >= num_classes):
+            raise ValueError(f"{side} split contains labels outside the class mapping.")
+        mismatches = [(str(path), int(label), class_names[int(label)])
+                      for path, label in zip(paths, labels)
+                      if Path(path).parent.name != class_names[int(label)]]
+        if mismatches:
+            path, label, expected = mismatches[0]
+            raise ValueError(
+                f"{side} label mismatch: {path} is class {Path(path).parent.name!r}, "
+                f"but label {label} maps to {expected!r}."
+            )
+        present = np.unique(labels)
+        if len(present) != num_classes:
+            raise ValueError(
+                f"{side} split contains {len(present)}/{num_classes} classes; "
+                "each class must appear in both splits."
+            )
+
+
+def check_smoke_acceptance(scores: np.ndarray, labels: np.ndarray,
+                           num_classes: int) -> dict[str, Any]:
+    """Reject smoke runs that execute but collapse to a single class."""
+    scores = np.asarray(scores)
+    labels = np.asarray(labels)
+    if scores.ndim != 2 or scores.shape != (len(labels), num_classes):
+        raise ValueError(
+            f"Smoke prediction shape {scores.shape} does not match "
+            f"({len(labels)}, {num_classes})."
+        )
+    if not np.all(np.isfinite(scores)):
+        raise ValueError("Smoke predictions contain non-finite values.")
+    predictions = scores.argmax(axis=1)
+    predicted_classes = np.unique(predictions)
+    accuracy = float(np.mean(predictions == labels))
+    if len(predicted_classes) < 2:
+        raise RuntimeError(
+            "Smoke test failed: the checkpoint predicts only one class on "
+            f"{len(labels)} balanced validation examples (class index "
+            f"{int(predicted_classes[0]) if len(predicted_classes) else 'none'}). "
+            "The pipeline ran, but this is not evidence of learning. Increase "
+            "smoke epochs or investigate optimization/model behavior; do not "
+            "promote this checkpoint."
+        )
+    return {"predicted_classes": predicted_classes.tolist(), "accuracy": accuracy}
+
+
 def build_model(image_size: int, num_classes: int, learning_rate: float):
     inputs = keras.Input((image_size, image_size, 3), name="rgb_image_01")
     # No horizontal flips: mirrored hand orientation may alter sign appearance.
@@ -245,6 +309,7 @@ def train(args) -> dict[str, Any]:
     max_per_class = args.smoke_per_class if args.smoke else None
     trp, trl, vap, val, class_names, duplicate_stats = split_files(
         files, args.validation_split, args.seed, max_per_class)
+    validate_training_labels(trp, trl, vap, val, class_names)
     print(f"Split: {len(trp)} train, {len(vap)} validation; {duplicate_stats}")
     print(f"GPU devices: {tf.config.list_physical_devices('GPU')}")
     train_ds = make_dataset(trp, trl, args.image_size, args.batch_size, True, args.seed)
@@ -270,6 +335,10 @@ def train(args) -> dict[str, Any]:
                  loss="sparse_categorical_crossentropy", metrics=["accuracy"])
     scores = best.predict(val_ds, verbose=0)
     y_pred = scores.argmax(axis=1)
+    smoke_check = None
+    if args.smoke:
+        smoke_check = check_smoke_acceptance(scores, val, len(class_names))
+        print("Smoke acceptance:", smoke_check)
     val_loss, val_acc = best.evaluate(val_ds, verbose=0)
     cm = confusion_matrix(val, y_pred, labels=np.arange(len(class_names)))
     report = classification_report(val, y_pred, labels=np.arange(len(class_names)),
@@ -303,6 +372,7 @@ def train(args) -> dict[str, Any]:
         "train_samples": int(len(trp)), "validation_samples": int(len(vap)),
         "best_val_accuracy": float(val_acc), "best_val_loss": float(val_loss),
         "smoke_test": bool(args.smoke), "training_epochs_completed": len(history.history["loss"]),
+        "smoke_acceptance": smoke_check,
         "trained_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "live_input_note": "Training uses centered dataset photos; live hand crop domain requires camera validation.",
         "dynamic_sign_limitation": "J and Z require motion and cannot be reliably recognized from one static image.",
