@@ -16,7 +16,9 @@ are motion signs, so a single image cannot reliably represent their movement.
 4. Run the training command below. It discovers the mounted dataset directory,
    audits all classes, groups perceptual duplicates before a deterministic
    stratified split, then trains with early stopping and best-validation-loss
-   checkpointing.
+   checkpointing. The log prints the script path, Git revision, branch, dirty
+   state, and TensorFlow/scikit-learn versions so a Kaggle run can be checked
+   against the intended checkout.
 
 ```bash
 git clone https://github.com/AKSHY-SV/Sign2Text.git /kaggle/working/Sign2Text
@@ -33,6 +35,29 @@ python train_cnn.py \
   --seed 42 \
   --patience 5
 ```
+
+For a bounded pipeline smoke test, use a balanced subset and a fixed epoch
+budget:
+
+```bash
+python train_cnn.py \
+  --dataset "$DATASET_DIR" \
+  --output-dir /kaggle/working/asl_cnn_smoke \
+  --image-size 64 \
+  --batch-size 32 \
+  --smoke \
+  --smoke-per-class 100 \
+  --smoke-epochs 8
+```
+
+Smoke mode uses BatchNormalization momentum 0.7 and runs the requested epochs
+without early stopping or learning-rate reduction. It still saves the best
+validation-loss checkpoint and fails if its predictions collapse, do not beat
+the majority-class accuracy, or its loss does not beat the uniform-class
+baseline. The output includes per-class split counts, prediction diagnostics,
+and `smoke_train_validation_grid.jpg` for checking actual images against their
+folder labels. This smoke gate checks that the training path learns; it does
+not predict full-dataset or webcam accuracy.
 
 The output directory contains `best.keras`, its exact `metadata.json`,
 `classification_report.json`, `confusion_matrix.csv`, and dataset audit files.

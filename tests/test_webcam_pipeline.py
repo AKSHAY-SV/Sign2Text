@@ -154,7 +154,7 @@ def test_duplicate_aware_split_fails_clearly_when_too_few_unique_groups(tmp_path
 def test_training_batch_labels_match_source_folders_and_rgb_contract(tmp_path):
     import cv2
     import tensorflow as tf
-    from train_cnn import make_dataset, validate_training_labels
+    from train_cnn import make_dataset, save_smoke_sample_grid, validate_training_labels
 
     names = ["A", "B", "C"]
     paths, labels = [], []
@@ -179,6 +179,18 @@ def test_training_batch_labels_match_source_folders_and_rgb_contract(tmp_path):
     assert float(tf.reduce_min(batch)) >= 0 and float(tf.reduce_max(batch)) <= 1
     np.testing.assert_array_equal(batch_labels.numpy(), labels[:6])
     np.testing.assert_allclose(batch.numpy()[0, 8, 8], [1.0, 0.0, 0.0], atol=1e-3)
+    shuffled = make_dataset(paths, labels, 16, 6, True, 7)
+    shuffled_pairs = list(shuffled.as_numpy_iterator())
+    shuffled_images = np.concatenate([images for images, _ in shuffled_pairs])
+    shuffled_labels = np.concatenate([batch_labels for _, batch_labels in shuffled_pairs])
+    assert len(shuffled_labels) == len(labels)
+    np.testing.assert_array_equal(
+        shuffled_images.mean(axis=(1, 2)).argmax(axis=1), shuffled_labels
+    )
+    grid = tmp_path / "smoke-grid.jpg"
+    save_smoke_sample_grid(paths, labels, paths, labels, names, grid)
+    preview = cv2.imread(str(grid))
+    assert preview is not None and preview.shape == (3 * 152, 4 * 128, 3)
     with pytest.raises(ValueError, match="label mismatch"):
         validate_training_labels(paths[:1], [1], paths, labels, names)
 
@@ -188,13 +200,16 @@ def test_smoke_acceptance_rejects_single_class_collapse_and_accepts_varied_outpu
 
     labels = np.array([0, 1, 2, 0, 1, 2])
     collapsed = np.tile([0.8, 0.1, 0.1], (6, 1))
-    with pytest.raises(RuntimeError, match="predicts only one class"):
-        check_smoke_acceptance(collapsed, labels, 3)
+    rejected = check_smoke_acceptance(collapsed, labels, 3, validation_loss=3.3)
+    assert not rejected["accepted"]
+    assert any("collapsed to class index 0" in item for item in rejected["failures"])
+    assert any("uniform-class loss" in item for item in rejected["failures"])
     varied = np.array([
         [0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8],
         [0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8],
     ])
-    result = check_smoke_acceptance(varied, labels, 3)
+    result = check_smoke_acceptance(varied, labels, 3, validation_loss=0.2)
+    assert result["accepted"]
     assert result["predicted_classes"] == [0, 1, 2]
     assert result["accuracy"] == 1.0
 
@@ -209,8 +224,56 @@ def test_synthetic_smoke_acceptance_accepts_balanced_non_degenerate_predictions(
     scores[np.arange(len(labels)), labels] = 0.90
     assert scores.shape == (12, 3)
     assert np.allclose(scores.sum(axis=1), 1.0)
-    accepted = check_smoke_acceptance(scores, labels, 3)
-    assert accepted == {"predicted_classes": [0, 1, 2], "accuracy": 1.0}
+    accepted = check_smoke_acceptance(scores, labels, 3, validation_loss=0.1)
+    assert accepted["accepted"]
+    assert accepted["predicted_classes"] == [0, 1, 2]
+    assert accepted["accuracy"] == 1.0
+
+
+def test_tiny_balanced_cnn_overfits_with_inference_consistent_batchnorm():
+    import tensorflow as tf
+    from train_cnn import build_model, set_seed
+
+    set_seed(101)
+    images, labels = [], []
+    for label in range(3):
+        for sample in range(12):
+            image = np.zeros((16, 16, 3), dtype=np.float32)
+            if label == 0:
+                image[:, :8, 0] = 1.0
+            elif label == 1:
+                image[:, 8:, 1] = 1.0
+            else:
+                image[::2, :, 2] = 1.0
+            if sample % 2:
+                image = np.roll(image, 1, axis=0)
+            images.append(image)
+            labels.append(label)
+    images = np.asarray(images, dtype=np.float32)
+    labels = np.asarray(labels, dtype=np.int32)
+    model = build_model(16, 3, 0.003, augmentation=False)
+    assert model.output_shape == (None, 3)
+    assert all(layer.momentum == 0.7 for layer in model.layers
+               if isinstance(layer, tf.keras.layers.BatchNormalization))
+    model.fit(images, labels, batch_size=12, epochs=8, shuffle=True, verbose=0)
+    scores = model.predict(images, verbose=0)
+    assert scores.shape == (len(labels), 3)
+    assert np.isfinite(scores).all()
+    assert np.allclose(scores.sum(axis=1), 1.0, atol=1e-4)
+    predictions = scores.argmax(axis=1)
+    assert len(np.unique(predictions)) == 3
+    assert np.mean(predictions == labels) >= 0.95
+
+
+def test_smoke_uses_fixed_epoch_budget_and_full_training_keeps_early_stopping(tmp_path):
+    from tensorflow import keras
+    from train_cnn import make_callbacks
+
+    smoke = make_callbacks(tmp_path / "smoke.keras", smoke=True, patience=5)
+    full = make_callbacks(tmp_path / "full.keras", smoke=False, patience=5)
+    assert [type(callback) for callback in smoke] == [keras.callbacks.ModelCheckpoint]
+    assert any(isinstance(callback, keras.callbacks.EarlyStopping) for callback in full)
+    assert any(isinstance(callback, keras.callbacks.ReduceLROnPlateau) for callback in full)
 
 
 def test_preprocess_contract_and_horizontal_mirror():
