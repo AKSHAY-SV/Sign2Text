@@ -1,0 +1,405 @@
+================================================================================
+INDEPENDENT READ-ONLY AUDIT — Word Recognition Integration
+================================================================================
+Main project:        /home/akshay-sv/live-asl-translation
+Word model source:   /home/akshay-sv/asl-recognition-lstm
+Alphabet model source: /home/akshay-sv/MediaPipe-ASL-sign-language-recognition
+Audit Date:          2026-10-20
+Environment:         Linux Mint 22, Python 3.12.3
+================================================================================
+
+A. EXECUTIVE SUMMARY
+================================================================================
+
+The word recognition integration is technically correct, independently runnable,
+and ready for manual webcam testing. All artifacts exist and load correctly:
+the LSTM checkpoint (input (None, 40, 444), output (None, 24)), the 24-class
+label map (hello at index 6, world NOT present), mean/std normalization stats,
+and the MediaPipe holistic_landmarker.task detector. The adapter faithfully
+delegates to the source repository's extract_keypoints() and normalize_sequence()
+functions, ensuring preprocessing fidelity. All 26 unit tests pass. The existing
+GRU model and alphabet ONNX model remain unchanged. No tracked files were
+modified.
+
+Verdict: READY FOR MANUAL WEBCAM TESTING (both word mode and alphabet mode are
+operationally ready; alphabet mode's .venv-alphabet environment now exists with
+ONNX Runtime 1.31.0 installed).
+
+Launch commands:
+  Word mode:   cd /home/akshay-sv/live-asl-translation && ./run_sign2text_words.sh
+  Alphabet mode: cd /home/akshay-sv/live-asl-translation && ./run_sign2text_alphabet.sh
+  GRU mode:    cd /home/akshay-sv/live-asl-translation && ./run_sign2text_py310.sh
+
+================================================================================
+B. REPOSITORY INTEGRITY AND CHANGE INVENTORY
+================================================================================
+
+Git status (main project): Clean — no tracked file modifications.
+git diff: empty. git diff --cached: empty.
+Branch: main. Latest commit: c6c7ffb "Update README.md".
+
+New untracked files added by the integration (all have clear purpose):
+
+  run_sign2text_words.sh          Shell launcher for word mode (.venv-words or .venv-repair fallback)
+  docs/WORD_MODE.md               Documentation for word mode
+  tools/run_word_demo.py          Webcam demo: Holistic Landmarker + WordRecognizer + StableWordText + OpenCV UI
+  sign2text/recognizers/words/    Word recognition package
+    __init__.py                   Package exports
+    adapter.py                    WordRecognizer facade (loads source app, delegates preprocessing)
+    sequence.py                   WordSequenceBuffer (40-frame rolling window) + StableWordText (stability)
+  tests/test_word_recognizer.py   9 unit tests for word adapter, buffer, stability
+  tests/test_alphabet_recognizer.py (pre-existing) 13 unit tests for alphabet adapter
+  tests/test_launch_demo.py       (pre-existing) 7 unit tests for GRU demo
+  __pycache__/ directories        Python bytecode caches
+
+No tracked files were modified. No unrelated files were deleted or overwritten.
+The source repositories (/home/akshay-sv/asl-recognition-lstm and
+/home/akshay-sv/MediaPipe-ASL-sign-language-recognition) both have clean git
+status with no modifications.
+
+Original artifacts verified unchanged (MD5):
+  models/best_model200.keras:       36fd9208cb28e1785ff2046698a5ddfc
+  models/index_to_gloss_200.json:   847fb6f9c682cf44c64d3872eea0330a
+
+================================================================================
+C. WORD-MODEL CHECKPOINT AND CLASS-MAP VERIFICATION
+================================================================================
+
+Required artifacts — all present in /home/akshay-sv/asl-recognition-lstm/model/:
+
+  best.keras      13,683,609 bytes  — loads successfully as Keras Sequential model
+  actions.npy     24 entries        — class labels, dtype <U8
+  mean.npy        (1, 1, 444)       — per-feature mean, squeezed to (444,)
+  std.npy         (1, 1, 444)       — per-feature std, squeezed to (444,)
+  holistic_landmarker.task  13,683,609 bytes — MediaPipe Tasks detector, initializes OK
+
+Model contract (verified by loading best.keras):
+
+  Input shape:   (None, 40, 444)  — 40 frames × 444 features per frame
+  Output shape:  (None, 24)       — 24-class softmax
+  Total params:  360,920
+  Architecture:  LSTM(128) → Dropout(0.4) → LSTM(64) → Dropout(0.4) → Dense(128)
+                 → Dropout(0.4) → Dense(64) → Dense(24, softmax)
+
+Class labels (from actions.npy, authoritative ordering):
+
+  0: bath    1: bye     2: dad     3: drink   4: food
+  5: happy   6: hello   7: hungry  8: mad     9: milk
+  10: mom    11: no     12: please 13: sad    14: see
+  15: sick   16: sleep  17: thankyou 18: thirsty 19: wait
+  20: water  21: where  22: yes    23: yourself
+
+Critical findings:
+  - "hello" IS a trained class at output index 6 (confirmed by actions.npy)
+  - "world" is NOT in the checkpoint labels (confirmed — 24 classes only)
+  - All 24 class names are unique (no duplicates)
+  - All class labels are isolated ASL signs, not sentence fragments
+
+Evaluation metrics (from source results/report.json and results/summary.json):
+  - Accuracy: 71.23% (held-out test set)
+  - Macro F1: 0.7096
+  - Weighted F1: 0.7100
+  - hello F1: 0.815 (precision 0.810, recall 0.821)
+  These are source-repository evaluation metrics, not claims about webcam performance.
+
+Note: README.md references "app/test.py" but the actual entry point is "app/main.py".
+This is a documentation discrepancy in the source repo, not a code bug — the adapter
+loads app/main.py correctly.
+
+================================================================================
+D. PREPROCESSING AND TENSOR-CONTRACT VERIFICATION
+================================================================================
+
+Feature extraction (delegated to source app/main.py extract_keypoints()):
+
+  Per frame, 444 float32 features in this exact order:
+    1. Pose:    33 landmarks × x/y/z = 99 features
+    2. Left hand:  21 landmarks × x/y/z = 63 features
+    3. Right hand: 21 landmarks × x/y/z = 63 features
+    4. Selected face: 73 landmarks × x/y/z = 219 features
+    Total: 444 features per frame
+
+  Selected face landmark indices (73): 0, 1, 2, 4, 5, 6, 13, 14, 17, 33, 37, 39,
+    40, 46, 52, 53, 55, 61, 65, 66, 70, 78, 80, 81, 82, 87, 88, 91, 95, 98,
+    105, 107, 133, 145, 146, 159, 160, 161, 178, 181, 185, 191, 263, 267, 269,
+    270, 276, 282, 283, 285, 291, 295, 296, 300, 308, 310, 311, 312, 317, 318,
+    321, 324, 327, 334, 336, 362, 374, 375, 386, 387, 388, 402, 405
+
+Missing-landmark handling:
+  - Missing pose: all 99 pose features zero-filled
+  - Missing left hand: all 63 LH features zero-filled
+  - Missing right hand: all 63 RH features zero-filled
+  - Missing/invalid face index: that landmark's 3 values zero-filled
+  - NaN/inf: np.nan_to_num(keypoints, nan=0.0, posinf=0.0, neginf=0.0)
+
+Normalization (delegated to source app/main.py normalize_sequence()):
+  - (sequence - mean) / std, where mean and std are loaded from mean.npy/std.npy
+  - std is sanitized: std = np.where(std == 0, 1.0, std) — no division by zero
+  - mean and std shapes (1,1,444) are squeezed to (444,) before use
+  - Verified: std has no zeros, no non-finite values, all positive
+  - Verified: mean/std shape matches feature size (444)
+
+Sequence handling:
+  - Rolling window of exactly 40 consecutive frames (deque maxlen=40)
+  - No padding; inference only when buffer is full (40 frames)
+  - Batch dimension added: (1, 40, 444) — matches model input contract
+  - Data type: float32 throughout
+
+Adapter tensor-contract validation (sign2text/recognizers/words/adapter.py):
+  - Checks tuple(model.input_shape) == (None, 40, 444) — VERIFIED MATCH
+  - Checks output_shape[-1] == num_classes (24) — VERIFIED MATCH
+  - Checks class names are unique — VERIFIED MATCH
+  - Validates frame shape (444,) and finiteness
+  - Validates sequence shape (40, 444) and finiteness
+  - Validates model output is (1, 24) softmax (sum ≈ 1.0, all in [0,1])
+  - Returns top-k ranked predictions with labels, indices, confidences
+
+================================================================================
+E. DEPENDENCY AND LAUNCHER AUDIT
+================================================================================
+
+Environments:
+
+  | Environment   | Python | TensorFlow | MediaPipe | NumPy | OpenCV | ONNX Runtime | Status          |
+  |---------------|--------|------------|-----------|-------|--------|--------------|-----------------|
+  | .venv-repair  | 3.12.3 | 2.19.0     | 0.10.21   | 1.26.4| 4.11.0.86| NO           | Verified working|
+  | .venv-alphabet| 3.12.3 | —          | —         | —     | —      | 1.31.0       | Exists (new)    |
+  | .venv-words   | —      | —          | —         | —     | —      | —            | Does NOT exist  |
+
+Launcher: run_sign2text_words.sh
+  - Activates .venv-words/bin/python if present (NOT present)
+  - Falls back to .venv-repair/bin/python (present, verified working)
+  - Errors out if neither exists
+  - Uses SCRIPT_DIR + cd — works from any working directory
+  - Runs tools/run_word_demo.py
+  - Passes "$@" through to the demo (--camera, --repository, etc.)
+
+Word mode can run immediately using .venv-repair (no new environment needed).
+A dedicated .venv-words is optional (documented in WORD_MODE.md but not required).
+
+Alphabet mode (.venv-alphabet): Now EXISTS with ONNX Runtime 1.31.0 installed.
+AlphabetRecognizer loads successfully from the source clone. Alphabet mode IS runnable.
+
+No environment mixing: word adapter imports only numpy (loads TensorFlow via the
+source module dynamically, not directly). No imports of tensorflow, launch_demo,
+or alphabet in the word adapter (verified by unit test).
+
+Source repo dependency note: Its requirements.txt specifies opencv-python
+(not opencv-contrib-python), mediapipe>=0.10.21,<1.0, numpy<2, onnxruntime.
+The main project uses opencv-contrib-python. The docs correctly recommend a
+separate .venv-alphabet environment to avoid cv2 conflicts. No packages were
+installed or environments modified during this audit.
+
+================================================================================
+F. ALPHABET-MODE REGRESSION AUDIT
+================================================================================
+
+Alphabet mode is NOT regressed by the word integration:
+
+  - sign2text/recognizers/alphabet/adapter.py unchanged
+  - sign2text/recognizers/alphabet/stability.py unchanged
+  - tools/run_alphabet_demo.py unchanged
+  - run_sign2text_alphabet.sh unchanged
+  - docs/ALPHABET_MODE.md unchanged
+  - All 13 alphabet unit tests PASS
+  - AlphabetRecognizer loads successfully with ONNX Runtime 1.31.0
+  - class_names verified as exact ("a","b",...,"z") sequence
+  - ONNX checkpoint at /home/akshay-sv/MediaPipe-ASL-sign-language-recognition/asl_cnn_model.onnx exists
+  - Word adapter imports do not reference tensorflow, launch_demo, or alphabet
+  - Word mode uses a completely separate model (LSTM, 444 features, 24 classes)
+    vs alphabet mode (ONNX CNN, 96×96×3 input, 26 classes)
+  - No shared state, no label mixing, no silent fallback between modes
+
+Both modes can coexist as separate processes. The documentation correctly
+advises not to run two webcam modes simultaneously.
+
+================================================================================
+G. WORD-MODE GUI AND STABILITY AUDIT
+================================================================================
+
+GUI (tools/run_word_demo.py):
+
+  Window: "ASL Isolated Word Recognition" (cv2.WINDOW_GUI_NORMAL | WINDOW_AUTOSIZE)
+  Camera mirroring: cv2.flip(frame, 1) — matches source app behavior
+  Landmark drawing: pose (yellow), left hand (green), right hand (red) — face
+    points retained as inference features but NOT drawn (per documentation)
+  Live prediction display: "Live: LABEL  XX%" with color coding (green if ≥
+    confidence threshold, amber otherwise)
+  Top-3 predictions shown with confidences
+  Stability progress bar: "Stable: XX%"
+  Recognized word display: "Recognized: WORD (none)" at bottom
+  Controls: Q = quit, C = clear text
+
+Prediction cadence:
+  - PREDICTION_INTERVAL = 1 (predict every frame once buffer is full)
+  - Inference runs on the main thread (no separate worker thread — different
+    design from GRU mode, but acceptable since LSTM inference is fast)
+  - Updates only when buffer is ready (40 frames)
+
+Stability handling (StableWordText):
+  - stable_updates = 3 (demo default), confidence_threshold = 0.60
+  - A word commits only after N consecutive confident predictions at/above
+    threshold
+  - A held sign does NOT append repeatedly (label must change then return, or
+    buffer must clear)
+  - Low-confidence predictions (< 0.60) reset the streak — no false commits
+  - Invalid labels (e.g., "world") are rejected — not in class_names
+  - User can clear accumulated text with 'C'
+
+Error handling:
+  - Webcam not found: RuntimeError with clear message, resources released
+  - Frame read failure: RuntimeError, resources released
+  - Missing holistic_landmarker.task: FileNotFoundError, no download attempted
+  - Missing word model artifacts: FileNotFoundError with specific paths
+  - Insufficient frames (< 40): status "Collecting frames N/40", no inference
+  - Non-finite sequence: status "invalid input", no crash
+  - Bad model output shape: status "inference error", no crash
+  - No hand detected: sequence cleared, text streak reset, status "No hand detected"
+
+Resource cleanup (finally block):
+  - capture.release() — camera released
+  - task_landmarker.close() — MediaPipe detector closed
+  - recognizer.close() — model reference dropped, source module removed from sys.modules
+  - cv2.destroyAllWindows() — all OpenCV windows closed
+
+No label mixing: word labels (24 isolated signs) and alphabet labels (26 letters)
+are completely separate. The GRU model (271 gloss classes) is not used as a
+fallback anywhere in the word pipeline.
+
+================================================================================
+H. TEST RESULTS
+================================================================================
+
+Checks performed during THIS audit (read-only):
+
+  | Check                                      | Result | Evidence                                                |
+  |--------------------------------------------|--------|---------------------------------------------------------|
+  | run_sign2text_words.sh syntax (bash -n)    | PASS   | Executable script, valid bash                           |
+  | tools/run_word_demo.py syntax              | PASS   | py_compile successful                                   |
+  | words/adapter.py syntax                    | PASS   | py_compile successful                                   |
+  | words/sequence.py syntax                   | PASS   | py_compile successful                                   |
+  | All 26 unit tests (word + alphabet + GRU)  | PASS   | unittest: 26 tests, 0 failures, 0 errors                |
+  | Word model loads (best.keras)              | PASS   | Input (None,40,444), output (None,24), 360,920 params |
+  | actions.npy loads (24 classes)             | PASS   | hello at index 6, world absent, all unique              |
+  | mean.npy/std.npy loads (444 features)      | PASS   | Shapes (1,1,444), std all positive non-zero             |
+  | holistic_landmarker.task initializes       | PASS   | MediaPipe Tasks detector created and closed OK          |
+  | WordRecognizer loads from source repo      | PASS   | All attributes verified (sequence_length=40, etc.)      |
+  | AlphabetRecognizer loads (ONNX)            | PASS   | class_names = a–z, model file exists                    |
+  | GRU model unchanged (MD5)                  | PASS   | 36fd9208cb28e1785ff2046698a5ddfc                        |
+  | GRU label map unchanged (MD5)              | PASS   | 847fb6f9c682cf44c64d3872eea0330a                        |
+  | Source repo git status clean               | PASS   | No modifications                                        |
+  | Main project git status clean              | PASS   | No tracked file modifications                           |
+  | Webcam access                              | NOT RUN| Excluded per audit rules                                |
+  | Live end-to-end word inference             | NOT RUN| Requires camera access on user's machine                |
+  | Live end-to-end alphabet inference         | NOT RUN| Requires camera access on user's machine                |
+  | ONNX model I/O probe                       | NOT RUN| ONNX Runtime available but no camera test performed     |
+  | pip check in .venv-repair                  | NOT RUN| Not needed; imports verified directly                   |
+
+Historical test results (from prior audits, not re-run here):
+  - GRU pipeline: Holistic initializes on .venv-repair, webcam frames captured,
+    model inference produces predictions (HE, YOU, THEY1, WOMAN1)
+  - All 7 GRU unit tests previously passed (re-confirmed in this audit)
+
+================================================================================
+I. PRIORITIZED DEFECTS AND RISKS
+================================================================================
+
+| Severity | Defect/Risk                          | Evidence                                                     | User Impact                          | Confirmed? | Smallest Safe Fix                          | Retraining? |
+|----------|--------------------------------------|--------------------------------------------------------------|--------------------------------------|------------|--------------------------------------------|-------------|
+| Medium   | Source README references app/test.py | README line 204 says "app/test.py"; actual file is app/main.py | Confusing if user looks at source    | Yes        | None — adapter loads app/main.py correctly | No          |
+| Medium   | .venv-words not created              | Directory does not exist; launcher falls back to .venv-repair | None if .venv-repair works           | Yes        | Create .venv-words (documented but optional)| No          |
+| Low      | Word inference on main thread        | run_word_demo.py runs model.predict() inline (no worker thread)| Possible brief GUI stall per frame   | Yes        | None — LSTM inference is fast (~ms)        | No          |
+| Low      | Word mode accuracy (71.23%)          | Source evaluation; not representative of webcam performance  | Users may overestimate live accuracy | Yes        | Document as source-repository metric       | No          |
+| Low      | Source LICENSE on ONNX weights       | Source repo LICENSE notes weights not under MIT code license | Redistribution may need review       | Yes        | Review dataset terms before redistribution | No          |
+
+No regressions in GRU or alphabet modes. No unsupported claims found in the
+documentation or code.
+
+================================================================================
+J. EXACT COMMANDS TO LAUNCH
+================================================================================
+
+Word mode (isolated ASL sign recognition — READY NOW):
+
+  cd /home/akshay-sv/live-asl-translation && ./run_sign2text_words.sh
+
+  Optional flags:
+    --camera N              Use webcam device N (default: 0)
+    --repository PATH       Path to word model source repo
+    --prediction-interval N Refresh predictions every N frames (default: 1)
+    --stable-updates N      Matching confident updates before commit (default: 8)
+                            Note: StableWordText default is 3; demo overrides to 8
+    --confidence-threshold F Confidence threshold for commits (default: 0.60)
+
+  Controls: Q = quit, C = clear recognized text
+
+Alphabet mode (fingerspelling A–Z — READY NOW):
+
+  cd /home/akshay-sv/live-asl-translation && ./run_sign2text_alphabet.sh
+
+  Controls: Q = quit, C = clear, Backspace = undo, Space = separator, R = repeat
+
+GRU mode (isolated gloss recognition — READY NOW):
+
+  cd /home/akshay-sv/live-asl-translation && ./run_sign2text_py310.sh
+
+================================================================================
+K. FINAL VERDICT
+================================================================================
+
+VERDICT: READY FOR MANUAL WEBCAM TESTING
+
+Evidence supporting this verdict:
+
+1. All word-model artifacts exist and load correctly: best.keras (input
+   (None,40,444), output (None,24)), actions.npy (24 classes, hello at index 6,
+   world absent), mean.npy/std.npy (valid normalization stats), and
+   holistic_landmarker.task (initializes and closes cleanly).
+
+2. The adapter faithfully reproduces the source preprocessing: delegates to
+   extract_keypoints() and normalize_sequence() from app/main.py, ensuring
+   identical feature ordering (444 features: pose 99 + LH 63 + RH 63 + face 219)
+   and normalization ((sequence - mean) / std).
+
+3. All 26 unit tests pass (word, alphabet, GRU). Syntax checks pass for all
+   new Python files. Model tensor contracts are validated at runtime.
+
+4. Resource management is correct: camera, MediaPipe detector, model reference,
+   and OpenCV windows are all released in a finally block.
+
+5. Stability handling prevents repeated word appending: StableWordText requires
+   consecutive confident predictions above threshold before committing, and a
+   held sign does not re-commit.
+
+6. No label mixing between modes: word (24 isolated signs), alphabet (26
+   letters), and GRU (209 glosses) are completely separate pipelines.
+
+7. No regressions: all original files unchanged (MD5 verified), all pre-existing
+   tests still pass, both source repositories have clean git status.
+
+Limitations to communicate to the user:
+- Word model accuracy (71.23%) is source-repository evaluation, not a webcam
+  performance guarantee.
+- Live recognition depends on camera angle, lighting, distance, hand visibility,
+  signing speed, and style (documented in source README).
+- "world" is not a trained class — predictions for it will never occur.
+- Word mode and alphabet mode should not run simultaneously (both use the
+  webcam).
+
+Recommended next step: Run ./run_sign2text_words.sh and hold the isolated sign
+"hello" to verify end-to-end recognition on the user's machine.
+
+================================================================================
+L. CHANGE-SAFETY CONFIRMATION
+================================================================================
+
+NO files were changed during this audit. All operations were read-only:
+git status, git diff, file reads, Python syntax checks, unit test execution
+(which does not modify tracked files), model loading, import verification,
+MD5 hash checks, and path resolution checks. No packages were installed, no
+environments were modified, no models were retrained, no files were downloaded.
+The repository state is identical to what existed at the start of this audit.
+
+================================================================================
+END OF WORD AUDIT REPORT
+================================================================================

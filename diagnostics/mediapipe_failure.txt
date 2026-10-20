@@ -1,0 +1,63 @@
+DIAGNOSTIC REPORT — MediaPipe Failure Analysis
+==============================================
+
+1. PYTHON ENVIRONMENT
+   System Python: 
+     executable: /usr/bin/python3
+     version: 3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+     path: ['', '/usr/lib/python312.zip', '/usr/lib/python3.12', ...]
+
+   .venv Python:
+     executable: /home/akshay-sv/live-asl-translation/.venv/bin/python3
+     version: 3.12.3 (same as system)
+     path: ['', '/usr/lib/python312.zip', '/usr/lib/python3.12', ...]
+
+2. PACKAGE VERSIONS (system Python)
+   mediapipe:      1.1.0 (from pip show)
+   protobuf:       7.36.2 (from pip show)
+   tensorflow:     2.21.0 (from pip show)
+   numpy:          2.5.3 (from pip show)
+   opencv-contrib-python: 5.0.0.93 (from pip show)
+
+3. PACKAGE VERSIONS (.venv)
+   mediapipe:      0.10.13 (from pip show)
+   protobuf:       3.20.0 (from pip show)
+   tensorflow:     2.19.0 (from pip show)
+   numpy:          2.5.4 (from pip show)
+   opencv-contrib-python: 5.0.0.93 (from pip show)
+
+4. PROTOBUF MESSAGEFACTORY
+   System Python: GetPrototype does NOT exist (False)
+   .venv Python: GetPrototype does NOT exist (False)
+   Conclusion: protobuf 3.20.0 and 7.36.2 both lack GetPrototype on Python 3.12
+
+5. MEDIAPIPE IMPORT RESULTS
+   System Python (1.1.0):
+     - mp.solutions NOT accessible from top-level
+     - mp.solutions.holistic raises ImportError
+     - Alternative import paths fail
+   
+   .venv Python (0.10.13):
+     - mp.solutions available and mp.solutions.holistic importable
+     - BUT Holistic() instantiation raises RuntimeError:
+       "ValidatedGraphConfig Initialization failed"
+     - Error: ImageToTensorCalculator ValidateOptionOutputDims
+     - This is a known MediaPipe 0.10.13 + Python 3.12 incompatibility
+
+6. HOLISTIC INSTANTIATION RESULTS
+   System Python 1.1.0: Cannot import mp.solutions.holistic at all
+   .venv Python 0.10.13: Holistic() raises RuntimeError (graph config failure)
+   Both environments: FAIL to produce working Holistic instance on Python 3.12
+
+7. ATTEMPTED ALTERNATIVES
+   - New MediaPipe API (tasks.python.vision.holistic_landmarker): 
+     RuntimeError: Unable to map file to memory buffer, errno=12
+   - New API with model asset path: Same error
+   - Direct module import (mediapipe.python.solutions.holistic): Works but Holistic() crashes
+   - system Python vs .venv Python: Both fail on Python 3.12
+
+8. CONCLUSION
+   Python 3.12 is INCOMPATIBLE with the repository's MediaPipe 0.10.13 requirement.
+   The repository requires Python 3.10.17 as stated in README.md.
+   No available method produces a working Holistic instance on Python 3.12.
+   Both environments (.venv and system Python) fail on Python 3.12.

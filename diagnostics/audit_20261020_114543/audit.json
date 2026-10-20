@@ -1,0 +1,15 @@
+{
+  "git_status": "?? .ipynb_checkpoints/\n?? .venv-live/\n?? .venv-repair/\n?? .venv/\n?? diagnostics/\n?? launch_demo.py\n?? run_sign2text.sh\n?? run_sign2text_py310.sh\n?? utils/__pycache__/",
+  "git_commit": "c6c7ffb Update README.md",
+  "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "model_sha256": "589f40d6522f6b2d",
+  "model_size": 12455010,
+  "json_sha256": "8c8225dc3eaf7399",
+  "json_size": 3612,
+  "notebook_sha256": "2f350440cbfb6193",
+  "mediapipe_version": "0.10.21",
+  "tensorflow_version": "2.19.0",
+  "numpy_version": "1.26.4",
+  "opencv-contrib-python_version": "not_importable",
+  "protobuf_version": "not_importable"
+}

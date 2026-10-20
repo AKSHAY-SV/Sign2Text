@@ -1,0 +1,18 @@
+# Python environments
+.venv/
+.venv-*/
+.venv-repair/
+.venv-alphabet/
+.venv-words/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Secrets
+.env
+.env.*
+
+# Local logs
+*.log

@@ -1,0 +1,355 @@
+================================================================================
+INDEPENDENT BLIND AUDIT — ASL Alphabet Recognition Integration
+================================================================================
+Repository: /home/akshay-sv/live-asl-translation
+Source clone: /home/akshay-sv/MediaPipe-ASL-sign-language-recognition
+Audit Date: 2026-10-20
+Environment: Linux Mint 22, Python 3.12.3
+================================================================================
+
+A. EXECUTIVE SUMMARY
+================================================================================
+
+The ASL alphabet fingerspelling integration is structurally complete but NOT
+runnable yet. The adapter code, source clone, ONNX model, class map, and
+preprocessing modules are all present and consistent. However, the isolated
+execution environment (`.venv-alphabet`) has not been created, ONNX Runtime is
+not installed anywhere, and no live inference has been performed. The existing
+GRU model and its label map remain unchanged.
+
+Verdict: READY WITH LIMITATIONS
+  - GRU mode (run_sign2text.sh): READY FOR MANUAL WEBCAM TESTING
+  - Alphabet mode (run_sign2text_alphabet.sh): BLOCKED — requires .venv-alphabet
+    setup with ONNX Runtime before any live inference is possible
+
+================================================================================
+B. REPOSITORY CHANGE INVENTORY
+================================================================================
+
+Main project (/home/akshay-sv/live-asl-translation):
+
+Modified tracked files: None (git diff clean — no tracked file changes).
+
+New untracked files related to alphabet integration:
+  run_sign2text_alphabet.sh   — Shell launcher; activates .venv-alphabet or
+                                falls back to .venv-repair; runs run_alphabet_demo.py
+  docs/ALPHABET_MODE.md       — Documentation for alphabet mode (dependencies,
+                                launch, limitations, license note)
+  sign2text/__init__.py       — Package marker
+  sign2text/recognizers/__init__.py — Package marker
+  sign2text/recognizers/alphabet/__init__.py — Exports AlphabetRecognizer etc.
+  sign2text/recognizers/alphabet/adapter.py   — AlphabetRecognizer class (ONNX
+                                adapter around clone's preprocessing/motion/
+                                smoothing modules)
+  sign2text/recognizers/alphabet/stability.py — StableTextBuffer (commit buffer)
+  tools/run_alphabet_demo.py  — Demo main loop: webcam + MediaPipe Hands +
+                                AlphabetRecognizer + StableTextBuffer + OpenCV UI
+
+Other new untracked files (pre-existing):
+  AUDIT_REPORT.txt, launch_demo.py, run_sign2text.sh, run_sign2text_py310.sh,
+  tools/, tests/, diagnostics/, .venv/, .venv-repair/, .venv-live/
+
+Source clone (/home/akshay-sv/MediaPipe-ASL-sign-language-recognition):
+  Git status: Clean — no modifications.
+  All files are original; nothing was added, removed, or edited during this audit.
+
+================================================================================
+C. LAUNCHER COMMAND AUDIT
+================================================================================
+
+Launcher: run_sign2text_alphabet.sh
+  Location: /home/akshay-sv/live-asl-translation/run_sign2text_alphabet.sh
+  Executable: Yes (-rwxrwxr-x)
+  Environment selection:
+    1. .venv-alphabet/bin/python  (preferred — does NOT exist yet)
+    2. .venv-repair/bin/python    (fallback — exists but lacks ONNX Runtime)
+    3. Error exit if neither exists
+  Entry point: tools/run_alphabet_demo.py (runs from PROJECT_ROOT)
+  Working directory: Uses SCRIPT_DIR + cd "$SCRIPT_DIR" — works from any CWD
+  Arguments: Passes "$@" through to run_alphabet_demo.py
+  Supported flags: --camera, --repository, --refresh-interval, --commit-frames,
+                   --commit-confidence
+
+Launcher: run_sign2text.sh (GRU mode — unchanged)
+  Environment: .venv-repair first, .venv fallback
+  Entry point: launch_demo.py (continuous webcam GUI)
+
+Launcher: run_sign2text_py310.sh (GRU mode — unchanged)
+  Environment: .venv-repair only
+  Entry point: Inline Python heredoc (one-shot 150-frame pipeline)
+
+Best candidate for alphabet demo: run_sign2text_alphabet.sh — but it CANNOT run
+until .venv-alphabet is created with ONNX Runtime installed.
+
+================================================================================
+D. ENVIRONMENT STATUS
+================================================================================
+
+| Environment   | Python | MediaPipe | TensorFlow | NumPy    | OpenCV        | ONNX Runtime | Holistic OK? |
+|---------------|--------|-----------|------------|----------|---------------|--------------|--------------|
+| System        | 3.12.3 | —         | —          | —        | —             | NO           | N/A          |
+| .venv         | 3.12.3 | 0.10.13   | 2.19.0     | 2.5.4    | 5.0.0.93      | NO           | NO (crashes) |
+| .venv-repair  | 3.12.3 | 0.10.21   | 2.19.0     | 1.26.4   | 4.11.0.86     | NO           | YES          |
+| .venv-alphabet| —      | —         | —          | —        | —             | —            | DOES NOT EXIST |
+
+Import verification (.venv-repair):
+  mediapipe 0.10.21: OK
+  tensorflow 2.19.0: OK
+  numpy 1.26.4: OK
+  cv2 4.11.0: OK
+  onnxruntime: NOT FOUND (any environment)
+
+Source clone requirements.txt:
+  opencv-python
+  mediapipe>=0.10.21,<1.0
+  numpy<2
+  onnxruntime
+
+Note: The source clone requires `opencv-python`, while the main project uses
+`opencv-contrib-python`. Installing both into one environment can overwrite shared
+cv2 files. The docs correctly recommend a SEPARATE .venv-alphabet environment.
+No packages were installed and no environment was changed during this audit.
+
+================================================================================
+E. PRETRAINED CHECKPOINT AND LABEL MAPPING
+================================================================================
+
+ONNX checkpoint (source clone):
+  File: /home/akshay-sv/MediaPipe-ASL-sign-language-recognition/asl_cnn_model.onnx
+  Size: 1,235,355 bytes (~1.2 MB)
+  Format: ONNX (data)
+  Exists: YES
+
+Class names (source clone):
+  File: /home/akshay-sv/MediaPipe-ASL-sign-language-recognition/class_names.txt
+  Content: a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z
+  Count: 26 letters (lowercase a–z)
+  Format: Comma-separated, no spaces
+  Matches expected a–z order: YES
+
+ONNX model contract:
+  Input shape: (N, 96, 96, 3)  — float32 RGB skeleton image, pixels 0–255
+  (The ONNX graph performs its own /255 rescaling internally.)
+  Output: "logits" (N, 26) — raw scores; caller applies softmax
+  Additional tap outputs: conv1_relu, dense_features (for visualiser)
+
+GRU checkpoint (main project — VERIFIED UNCHANGED):
+  File: models/best_model200.keras
+  MD5: 36fd9208cb28e1785ff2046698a5ddfc
+  Input shape: (None, 150, 172)
+  Output shape: (None, 271)
+
+GRU label map (main project — VERIFIED UNCHANGED):
+  File: models/index_to_gloss_200.json
+  MD5: 847fb6f9c682cf44c64d3872eea0330a
+  Entries: 209 (indices 0–208, string keys)
+  Labels: Glosses (HELLO, YOU, YOUR, etc.) — NOT alphabet letters
+
+================================================================================
+F. PREPROCESSING AND ADAPTER INTERFACE AUDIT
+================================================================================
+
+Adapter default values (sign2text/recognizers/alphabet/adapter.py):
+  DEFAULT_REPOSITORY = /home/akshay-sv/MediaPipe-ASL-sign-language-recognition  ✅ EXISTS
+  DEFAULT_MODEL_NAME   = asl_cnn_model.onnx                                     ✅ EXISTS
+  DEFAULT_CLASSES_NAME = class_names.txt                                        ✅ EXISTS
+  SMOOTHING_WINDOW     = 8
+  MODEL_INPUT_SHAPE    = (1, 96, 96, 3)
+
+Adapter class-name validation:
+  read_class_names() verifies class_names.txt matches exactly
+  ("abcdefghijklmnopqrstuvwxyz") — raises ValueError if mismatch
+  VERIFIED: class_names.txt content matches expected order ✅
+
+Support modules loaded from source clone:
+  preprocessing.py — EXISTS ✅
+  motion.py        — EXISTS ✅
+  smoothing.py     — EXISTS ✅
+
+Adapter preprocessing chain (verified against source):
+  1. landmarks_to_pixels(hand_landmarks, width, height) → (21, 2) float32 pixels
+  2. OneEuroFilter smoothing on raw pixel landmarks
+  3. MotionTracker.update(smoothed) — raw pixels divided by hand size
+  4. normalize_landmarks(smoothed) → [0,1] canvas coords, aspect preserved
+  5. render_skeleton(normalized, size=96) → (96, 96, 3) uint8 RGB skeleton
+  6. model_input(skeleton) → (1, 96, 96, 3) float32 batch
+  7. ONNX inference → (1, 26) logits
+  8. softmax(logits) → 26 probabilities
+  9. Moving average over last 8 probability vectors (SMOOTHING_WINDOW)
+  10. MotionTracker.classify(label) — may override i→j or d→z based on motion
+
+Preprocessing consistency:
+  - Source clone and adapter use the SAME preprocessing.py (loaded via importlib
+    from the clone path, not copied) ✅
+  - render_skeleton output is RGB (not BGR) — matches training ✅
+  - HAND_FILL = 0.7, CANVAS_SIZE = 192, MODEL_INPUT_SIZE = 96 — shared ✅
+  - Canvas drawn above target and downsampled with INTER_AREA ✅
+
+Motion rules (J/Z):
+  - J_SHAPES = {"i", "j"}, Z_SHAPES = {"d", "z"} — only overrides compatible shapes
+  - J: descent ≥ 0.20 + hook ≥ 0.12 + path ≥ 0.55 hand widths
+  - Z: reversals ≥ 2 + horizontal ≥ 0.30 + path ≥ 0.55 hand widths
+  - Rule-based, not learned (documented limitation)
+
+Stability buffer (StableTextBuffer):
+  - commit_frames default = 10, confidence_threshold default = 0.75
+  - Commits letter only after consecutive agreeing inference updates above threshold
+  - Keys: C clear, Backspace undo, Space separator, R repeat, Q quit
+
+================================================================================
+G. GRU MODEL AND LABEL MAP — UNCHANGED VERIFICATION
+================================================================================
+
+Both GRU artifacts verified unchanged via MD5 hash comparison:
+
+  models/best_model200.keras:
+    Hash: 36fd9208cb28e1785ff2046698a5ddfc
+    Status: UNCHANGED ✅
+
+  models/index_to_gloss_200.json:
+    Hash: 847fb6f9c682cf44c64d3872eea0330a
+    Status: UNCHANGED ✅
+
+The GRU model:
+  - Input: (None, 150, 172) — 150 timesteps × 172 features (86 landmarks × 2)
+  - Output: (None, 271) — 271 gloss classes
+  - Labels: 209 mapped (0–208), 62 unmapped (209–270)
+  - Vocabulary: Isolated ASL glosses (HELLO, YOU, YOUR, etc.) — NOT alphabet letters
+
+No modifications were made to the GRU model, its label map, the original notebook,
+or the original .venv environment.
+
+================================================================================
+H. SAFE OFFLINE TEST RESULTS
+================================================================================
+
+| Check                                      | Result | Details                                                |
+|--------------------------------------------|--------|--------------------------------------------------------|
+| run_sign2text_alphabet.sh syntax           | PASS   | bash -n (executable script)                            |
+| tools/run_alphabet_demo.py syntax          | PASS   | py_compile successful                                  |
+| sign2text/recognizers/alphabet/adapter.py  | PASS   | py_compile successful                                  |
+| sign2text/recognizers/alphabet/stability.py| PASS   | py_compile successful                                  |
+| sign2text.alphabet package import          | PASS   | Imports OK (without ONNX Runtime — fails only at       |
+|                                            |        | session creation, as expected)                         |
+| Adapter DEFAULT_* path resolution          | PASS   | All paths resolve to existing files in source clone    |
+| class_names.txt validation (a–z order)     | PASS   | Exact match to expected 26-letter sequence             |
+| ONNX model file exists                     | PASS   | 1,235,355 bytes in source clone                        |
+| Source clone git status                    | PASS   | Clean — no modifications                               |
+| GRU model hash (unchanged)                 | PASS   | MD5 matches expected value                             |
+| GRU label map hash (unchanged)             | PASS   | MD5 matches expected value                             |
+| Existing GRU unit tests (7 tests)          | PASS   | unittest — all passed                                  |
+| ONNX Runtime availability                  | FAIL   | NOT installed in .venv-repair, system Python, or any   |
+|                                            |        | environment — .venv-alphabet does not exist            |
+| .venv-alphabet existence                   | FAIL   | Directory does not exist                               |
+| Webcam access                              | NOT RUN| Excluded per audit rules                               |
+| Live alphabet inference                    | NOT RUN| Cannot run without .venv-alphabet + ONNX Runtime       |
+| ONNX model I/O verification                | NOT RUN| Requires ONNX Runtime to load and inspect              |
+| pip check in .venv-alphabet                | NOT RUN| Environment does not exist                             |
+
+================================================================================
+I. REGRESSIONS AND UNSUPPORTED CLAIMS
+================================================================================
+
+Issue 1 — .venv-alphabet not created (BLOCKER)
+  Severity: High
+  Evidence: Directory does not exist; ONNX Runtime not installed in any
+            environment; run_sign2text_alphabet.sh will error exit.
+  Impact: Alphabet recognizer cannot launch at all.
+  Fix: Create .venv-alphabet and install dependencies (see docs/ALPHABET_MODE.md):
+        python3.12 -m venv .venv-alphabet
+        .venv-alphabet/bin/python -m pip install 'numpy<2' \
+          'opencv-python==4.11.0.86' 'mediapipe==0.10.21' onnxruntime
+        .venv-alphabet/bin/python -m pip check
+  Retraining needed: No
+
+Issue 2 — ONNX model I/O not independently verified
+  Severity: Medium
+  Evidence: Cannot load ONNX session without ONNX Runtime; cannot confirm
+            input/output tensor names or shapes at runtime.
+  Impact: Adapter contract (input [1,96,96,3], output logits [1,26]) is
+            structurally consistent with source code but not runtime-tested.
+  Fix: Install ONNX Runtime in .venv-alphabet, then run a one-off inference
+       probe to confirm tensor contract.
+  Retraining needed: No
+
+Issue 3 — No live inference testing performed
+  Severity: Medium
+  Evidence: Webcam access excluded per audit rules; .venv-alphabet does not exist.
+  Impact: Cannot confirm end-to-end webcam → MediaPipe Hands → ONNX → letter
+          output pipeline works on this hardware.
+  Fix: After .venv-alphabet setup, run ./run_sign2text_alphabet.sh with camera.
+  Retraining needed: No
+
+Issue 4 — Source clone LICENSE note on ONNX weights
+  Severity: Low (informational)
+  Evidence: docs/ALPHABET_MODE.md and source LICENSE state ONNX weights are NOT
+            covered by the MIT code license; weights derive from GPL-2.0 +
+            CC0 datasets. Integration references the local clone only, does not
+            copy or redistribute weights.
+  Impact: Redistribution of the combined system may require checking dataset
+          license terms.
+  Fix: Review source LICENSE and dataset terms before any redistribution.
+  Retraining needed: No
+
+No regressions detected in the existing GRU pipeline. All original files unchanged.
+All 7 pre-existing unit tests pass. No unsupported claims found in the adapter
+code — documentation accurately describes limitations (J/Z rule-based, no digits,
+no confidence calibration for motion rules).
+
+================================================================================
+J. VERDICT AND LAUNCH COMMANDS
+================================================================================
+
+VERDICT: READY WITH LIMITATIONS
+
+  GRU mode (isolated sign/gloss recognition):
+    READY FOR MANUAL WEBCAM TESTING — all code, models, labels, and
+    environments verified; launchers functional; unit tests pass.
+
+  Alphabet mode (fingerspelling A–Z):
+    BLOCKED until .venv-alphabet is created and ONNX Runtime installed.
+    Code and configuration are complete and correct; only the execution
+    environment is missing.
+
+Exact launch commands:
+
+  # GRU mode (isolated sign recognition — ready now):
+  cd /home/akshay-sv/live-asl-translation && ./run_sign2text_py310.sh
+
+  # OR continuous GUI mode:
+  cd /home/akshay-sv/live-asl-translation && ./run_sign2text.sh
+
+  # Alphabet mode (fingerspelling — BLOCKED until setup):
+  cd /home/akshay-sv/live-asl-translation && ./run_sign2text_alphabet.sh
+  #   ^ Will error until .venv-alphabet exists with ONNX Runtime
+
+Remaining setup commands (for alphabet mode only):
+
+  cd /home/akshay-sv/live-asl-translation
+  python3.12 -m venv .venv-alphabet
+  .venv-alphabet/bin/python -m pip install 'numpy<2' \
+      'opencv-python==4.11.0.86' 'mediapipe==0.10.21' onnxruntime
+  .venv-alphabet/bin/python -m pip check
+  ./run_sign2text_alphabet.sh
+
+  Optional alphabet flags:
+    --camera 1              # use a different webcam device
+    --refresh-interval 2    # run ONNX inference every N frames
+    --commit-frames 10      # consecutive agreeing frames to commit a letter
+    --commit-confidence 0.75 # confidence threshold for committing
+
+================================================================================
+K. CHANGE-SAFETY CONFIRMATION
+================================================================================
+
+NO files were changed during this audit. All operations were read-only:
+git status, git diff, file reads, Python syntax checks, unit test execution,
+import verification, MD5 hash checks, and path resolution checks. The repository
+state (both /home/akshay-sv/live-asl-translation and
+/home/akshay-sv/MediaPipe-ASL-sign-language-recognition) is identical to what
+existed at the start of this audit. No packages installed, no environments
+modified, no models retrained, no files downloaded.
+
+================================================================================
+END OF ALPHABET AUDIT REPORT
+================================================================================
