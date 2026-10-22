@@ -8,14 +8,51 @@ from unittest.mock import patch
 import numpy as np
 
 from sign2text.integrated import (
-    TextAccumulator, apply_text_key, apply_worker_commit, encode_frame, enqueue_latest,
-    read_frame, presentation_fields, switch_input_mode, valid_worker_result,
+    ConfirmationController, PendingCandidate, TextAccumulator, apply_candidate_action,
+    apply_candidate_key, apply_text_key, apply_worker_commit, candidate_from_result, encode_frame,
+    candidate_outside_cooldown, enqueue_latest, read_frame, presentation_fields, switch_input_mode,
+    update_pending_candidate, valid_worker_result,
 )
 from sign2text.recognizers.alphabet import StableTextBuffer
 from sign2text.recognizers.words import StableWordText, WordReleaseGate
 
 
 class IntegratedProtocolTests(unittest.TestCase):
+    def test_camera_frame_fits_window_with_letterboxing_and_aspect_ratio(self):
+        from tools.run_sign2text_integrated import fit_camera_frame
+
+        frame = np.zeros((100, 200, 3), dtype=np.uint8)
+        frame[:, :, 1] = 200
+        fitted = fit_camera_frame(frame, 300, 300)
+        self.assertEqual(fitted.shape, (300, 300, 3))
+        np.testing.assert_array_equal(fitted[:75], 0)
+        np.testing.assert_array_equal(fitted[225:], 0)
+        self.assertTrue(np.all(fitted[75:225, :, 1] == 200))
+
+    def test_camera_frame_fills_wide_window_without_distortion(self):
+        from tools.run_sign2text_integrated import fit_camera_frame
+
+        frame = np.ones((100, 200, 3), dtype=np.uint8)
+        fitted = fit_camera_frame(frame, 400, 200)
+        self.assertEqual(fitted.shape, (200, 400, 3))
+        self.assertTrue(np.all(fitted == 1))
+
+    def test_window_dimensions_use_camera_size_for_invalid_or_tiny_query(self):
+        from tools.run_sign2text_integrated import _render_dimensions
+
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        with patch("cv2.getWindowImageRect", return_value=(0, 0, 1, 1)):
+            self.assertEqual(_render_dimensions(frame, "test", (640, 480)), (640, 480))
+        with patch("cv2.getWindowImageRect", side_effect=Exception("not mapped")):
+            self.assertEqual(_render_dimensions(frame, "test", (0, 0)), (640, 480))
+
+    def test_window_dimensions_accept_plausible_client_area(self):
+        from tools.run_sign2text_integrated import _render_dimensions
+
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        with patch("cv2.getWindowImageRect", return_value=(10, 20, 1200, 800)):
+            self.assertEqual(_render_dimensions(frame, "test", (640, 480)), (1200, 800))
+
     def test_frame_round_trip_preserves_bgr_values_and_sequence(self):
         frame = np.arange(4 * 5 * 3, dtype=np.uint8).reshape(4, 5, 3)
         header, payload = encode_frame(17, frame)
@@ -58,6 +95,172 @@ class IntegratedProtocolTests(unittest.TestCase):
 
 
 class TextAccumulatorTests(unittest.TestCase):
+    def test_predictions_stay_pending_until_confirmed(self):
+        text = TextAccumulator()
+        record = {"mode": "word", "sequence": 2, "input_enabled": True,
+                  "prediction": {"label": "hello", "confidence": .97},
+                  "signing_hand": "Right", "signing_hand_verified": True}
+        candidate = candidate_from_result(record, selected_mode="word")
+        self.assertEqual(candidate.label, "hello")
+        self.assertEqual(text.text, "")
+        self.assertTrue(apply_candidate_action(text, candidate, "confirm"))
+        self.assertEqual(text.text, "HELLO")
+
+    def test_reject_preserves_committed_text(self):
+        text = TextAccumulator()
+        text.append_word("hello")
+        before = text.text
+        self.assertTrue(apply_candidate_action(
+            text, PendingCandidate("alphabet", "w", .9, 3), "reject"))
+        self.assertEqual(text.text, before)
+
+    def test_keyboard_candidate_confirmation_and_rejection_fallback(self):
+        text = TextAccumulator()
+        candidate = PendingCandidate("word", "hello", .9, 1)
+        self.assertEqual(apply_candidate_key(text, candidate, ord("+")), "confirm")
+        self.assertEqual(text.text, "HELLO")
+        self.assertEqual(apply_candidate_key(
+            text, PendingCandidate("word", "thanks", .8, 2), ord("r")), "reject")
+        self.assertEqual(text.text, "HELLO")
+
+    def test_open_palm_hold_confirms_once_and_requires_release(self):
+        candidate = PendingCandidate("word", "hello", .9, 1)
+        controller = ConfirmationController(.3)
+        text = TextAccumulator()
+        self.assertIsNone(controller.update("open_palm", 0, handedness_reliable=True,
+                                            candidate=candidate))
+        action = controller.update("open_palm", .31, handedness_reliable=True,
+                                   candidate=candidate)
+        self.assertEqual(action, "confirm")
+        self.assertTrue(apply_candidate_action(text, candidate, action))
+        self.assertEqual(text.text, "HELLO")
+        second = PendingCandidate("word", "thanks", .9, 2)
+        self.assertIsNone(controller.update("open_palm", 1.3, handedness_reliable=True,
+                                            candidate=second))
+        # One held palm cannot confirm the next candidate.
+        controller.begin_cooldown(.61)
+        self.assertAlmostEqual(controller.cooldown_remaining(.61), 3.0)
+        self.assertEqual(controller.state, "cooldown")
+        self.assertEqual(text.text, "HELLO")
+
+    def test_cooldown_blocks_new_candidates_and_late_results(self):
+        controller = ConfirmationController(.3)
+        candidate = PendingCandidate("word", "hello", .9, 1)
+        controller.update("open_palm", 0, handedness_reliable=True, candidate=candidate)
+        self.assertEqual(controller.update("open_palm", .31, handedness_reliable=True,
+                                           candidate=candidate), "confirm")
+        controller.begin_cooldown(.31)
+        during = PendingCandidate("word", "thanks", .9, 20)
+        self.assertIsNone(candidate_outside_cooldown(
+            during, controller=controller, now=2.0, blocked_through_sequence=-1))
+        self.assertEqual(controller.cooldown_remaining(3.5), 0.0)
+        self.assertIsNone(candidate_outside_cooldown(
+            during, controller=controller, now=3.5, blocked_through_sequence=25))
+        fresh = PendingCandidate("word", "thanks", .9, 26)
+        self.assertIs(candidate_outside_cooldown(
+            fresh, controller=controller, now=3.5, blocked_through_sequence=25), fresh)
+
+    def test_neutral_release_rearms_open_palm_after_cooldown(self):
+        candidate = PendingCandidate("word", "hello", .9, 1)
+        next_candidate = PendingCandidate("word", "thanks", .9, 40)
+        controller = ConfirmationController(.3)
+        controller.update("open_palm", 0, handedness_reliable=True, candidate=candidate)
+        self.assertEqual(controller.update("open_palm", .31, handedness_reliable=True,
+                                           candidate=candidate), "confirm")
+        # Open palm by itself cannot release the post-confirmation lock.
+        controller.begin_cooldown(.31)
+        self.assertIsNone(controller.update("open_palm", 3.5, handedness_reliable=True,
+                                            candidate=next_candidate, observation_sequence=1))
+        self.assertEqual(controller.state, "waiting for release")
+        self.assertIsNone(controller.update("neutral", 3.6, handedness_reliable=True,
+                                            candidate=next_candidate, observation_sequence=2))
+        self.assertEqual(controller.state, "ready")
+        self.assertIsNone(controller.update("open_palm", 3.7, handedness_reliable=True,
+                                            candidate=next_candidate, observation_sequence=3))
+        self.assertEqual(controller.state, "holding open palm")
+        self.assertIsNone(controller.update("open_palm", 3.8, handedness_reliable=True,
+                                            candidate=next_candidate, observation_sequence=4))
+        self.assertEqual(controller.update("open_palm", 4.02, handedness_reliable=True,
+                                           candidate=next_candidate, observation_sequence=5),
+                         "confirm")
+
+    def test_open_palm_never_edits_text_or_confirms(self):
+        text = TextAccumulator()
+        text.append_word("kept")
+        before = text.text
+        controller = ConfirmationController(.3)
+        candidate = PendingCandidate("word", "new", .9, 1)
+        self.assertIsNone(controller.update("open_palm", 0, handedness_reliable=True,
+                                            candidate=candidate))
+        self.assertEqual(controller.update("open_palm", .31, handedness_reliable=True,
+                                           candidate=candidate), "confirm")
+        self.assertFalse(apply_candidate_action(text, candidate, "open_palm"))
+        self.assertEqual(text.text, before)
+        no_candidate = ConfirmationController(.3)
+        self.assertIsNone(no_candidate.update("open_palm", 0, handedness_reliable=True,
+                                              candidate=None))
+        self.assertIsNone(no_candidate.update("open_palm", .31, handedness_reliable=True,
+                                              candidate=None))
+        self.assertEqual(text.text, before)
+
+    def test_unreliable_handedness_and_no_candidate_never_act(self):
+        controller = ConfirmationController(.5)
+        candidate = PendingCandidate("word", "hello", .9, 1)
+        self.assertIsNone(controller.update("open_palm", 0, handedness_reliable=False,
+                                            candidate=candidate))
+        self.assertIsNone(controller.update("open_palm", 1, handedness_reliable=True,
+                                            candidate=None))
+
+    def test_candidate_change_restarts_hold_and_right_hand_is_not_controller(self):
+        controller = ConfirmationController(.5)
+        first = PendingCandidate("word", "hello", .9, 1)
+        second = PendingCandidate("word", "thanks", .9, 2)
+        self.assertIsNone(controller.update("open_palm", 0, handedness_reliable=True,
+                                            candidate=first))
+        self.assertIsNone(controller.update("open_palm", .4, handedness_reliable=True,
+                                            candidate=second))
+        self.assertEqual(controller.update("open_palm", .91, handedness_reliable=True,
+                                           candidate=second), "confirm")
+        controller.reset()
+        self.assertIsNone(controller.update("open_palm", 2, handedness_reliable=False,
+                                            candidate=second))
+
+    def test_cached_worker_observation_cannot_satisfy_stable_hold(self):
+        controller = ConfirmationController(.5)
+        candidate = PendingCandidate("word", "hello", .9, 1)
+        self.assertIsNone(controller.update("open_palm", 0, handedness_reliable=True,
+                                            candidate=candidate, observation_sequence=10))
+        self.assertIsNone(controller.update("open_palm", 1, handedness_reliable=True,
+                                            candidate=candidate, observation_sequence=10))
+        self.assertEqual(controller.state, "holding open palm")
+        self.assertIsNone(controller.update("open_palm", 1.1, handedness_reliable=True,
+                                            candidate=candidate, observation_sequence=11))
+        self.assertEqual(controller.state, "holding open palm")
+
+    def test_stale_or_wrong_mode_worker_prediction_is_not_pending(self):
+        record = {"mode": "word", "sequence": 4, "input_enabled": True,
+                  "prediction": {"label": "hello", "confidence": .9},
+                  "signing_hand": "Right", "signing_hand_verified": True}
+        self.assertIsNone(candidate_from_result(record, selected_mode="alphabet"))
+        self.assertIsNone(candidate_from_result(record, selected_mode="word",
+                                                minimum_sequence=5))
+        self.assertIsNone(candidate_from_result({**record, "input_enabled": False},
+                                                selected_mode="word"))
+
+    def test_pending_survives_neutral_result_and_stale_candidate_cannot_replace_it(self):
+        current = PendingCandidate("word", "hello", .9, 12)
+        still_pending, changed = update_pending_candidate(current, None)
+        self.assertIs(still_pending, current)
+        self.assertFalse(changed)
+        stale = PendingCandidate("word", "thanks", .9, 11)
+        still_pending, changed = update_pending_candidate(current, stale)
+        self.assertIs(still_pending, current)
+        self.assertFalse(changed)
+        fresh = PendingCandidate("word", "thanks", .92, 13)
+        replaced, changed = update_pending_candidate(current, fresh)
+        self.assertEqual(replaced, fresh)
+        self.assertTrue(changed)
+
     def test_word_letter_separator_clear_and_backspace(self):
         text = TextAccumulator()
         text.append_letter("a")
@@ -77,6 +280,7 @@ class TextAccumulatorTests(unittest.TestCase):
             "status": "accepted", "prediction": {"label": "hello", "confidence": .97},
             "top": [{"label": "hello", "confidence": .97}], "progress": 1.0,
             "committed": "hello", "input_enabled": True,
+            "signing_hand": "Right", "signing_hand_verified": True,
         }
         self.assertTrue(valid_worker_result(accepted_hello, "word", {"hello"}))
         self.assertTrue(apply_worker_commit(text, accepted_hello, selected_mode="word"))
@@ -139,6 +343,7 @@ class TextAccumulatorTests(unittest.TestCase):
             "mode": "word", "sequence": 1, "status": "accepted",
             "prediction": {"label": "hello", "confidence": .97},
             "input_enabled": True, "committed": "hello",
+            "signing_hand": "Right", "signing_hand_verified": True,
         }, selected_mode="word"))
         for _ in range(5):
             if word.update("hello", 0.97) and word_release.accept("hello"):
@@ -154,6 +359,7 @@ class TextAccumulatorTests(unittest.TestCase):
             "mode": "word", "sequence": 2, "status": "accepted",
             "prediction": {"label": "hello", "confidence": .97},
             "input_enabled": True, "committed": "hello",
+            "signing_hand": "Right", "signing_hand_verified": True,
         }, selected_mode="word"))
         self.assertEqual(text.text, "HELLO HELLO")
         switch_input_mode(text, "word", "alphabet")
@@ -228,7 +434,8 @@ class TextAccumulatorTests(unittest.TestCase):
                                      {"word": "ready", "alphabet": "ready"}, text)
         self.assertEqual(fields, (
             ("Input mode", "WORD"), ("Word", "HELLO 97.0%"),
-            ("Letter", "O 89.0%"), ("Status", "Stabilizing word"),
+            ("Letter", "O 89.0%"), ("Candidate", "(none)"),
+            ("Status", "Stabilizing word"),
             ("Text", "HELLO"),
         ))
         self.assertEqual(fields[-1], ("Text", text.text))
@@ -237,6 +444,108 @@ class TextAccumulatorTests(unittest.TestCase):
         self.assertNotIn("Stable:", rendered)
         self.assertNotIn("Top:", rendered)
         self.assertNotIn("worker_id", rendered)
+
+    def test_presentation_marks_pending_candidate_and_keeps_text_separate(self):
+        text = TextAccumulator()
+        text.append_word("hello")
+        fields = presentation_fields(
+            "word", {}, {"word": "ready", "alphabet": "ready"}, text,
+            candidate=PendingCandidate("word", "thanks", .91, 3),
+        )
+        self.assertIn(("Candidate", "WORD THANKS 91.0% — Pending"), fields)
+        self.assertEqual(fields[-1], ("Text", "HELLO"))
+
+    def test_controller_identity_requires_confident_left_classification(self):
+        from types import SimpleNamespace
+        from tools.run_sign2text_integrated import classify_controller_hands
+
+        def hand_at(x):
+            point = SimpleNamespace(x=x, y=.5)
+            return SimpleNamespace(landmark=[point] * 21)
+        left = SimpleNamespace(label="Left", score=.95)
+        right = SimpleNamespace(label="Right", score=.95)
+        result = lambda hands, labels: SimpleNamespace(
+            multi_hand_landmarks=hands, multi_handedness=labels)
+        paired = classify_controller_hands(result(
+            [hand_at(.2), hand_at(.7)], [[left], [right]]))
+        self.assertTrue(paired["reliable"])
+        self.assertEqual(paired["controller"], "Left")
+        self.assertEqual(paired["signing_hand"], "Right")
+        right_only = classify_controller_hands(result([hand_at(.7)], [[right]]))
+        self.assertFalse(right_only["reliable"])
+        ambiguous = classify_controller_hands(result(
+            [hand_at(.2), hand_at(.7)], [[left], [SimpleNamespace(label="Right", score=.4)]]))
+        self.assertFalse(ambiguous["reliable"])
+
+    def test_controller_open_palm_is_left_only_and_right_palm_is_not_controller(self):
+        from types import SimpleNamespace
+        from tools.run_sign2text_integrated import classify_controller_hands
+
+        def hand_at(x, *, palm=False):
+            points = [SimpleNamespace(x=x, y=.6) for _ in range(21)]
+            if palm:
+                for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+                    points[tip].y = .2
+                    points[pip].y = .4
+            return SimpleNamespace(landmark=points)
+
+        left = SimpleNamespace(label="Left", score=.97)
+        right = SimpleNamespace(label="Right", score=.97)
+        result = lambda hands, labels: SimpleNamespace(
+            multi_hand_landmarks=hands, multi_handedness=labels)
+        left_palm = classify_controller_hands(result([hand_at(.2, palm=True)], [[left]]))
+        self.assertTrue(left_palm["reliable"])
+        self.assertEqual(left_palm["gesture"], "open_palm")
+        right_palm = classify_controller_hands(result([hand_at(.7, palm=True)], [[right]]))
+        self.assertFalse(right_palm["reliable"])
+        self.assertIsNone(right_palm["gesture"])
+
+    def test_left_hand_only_never_creates_word_candidate_but_right_hand_does(self):
+        left_result = {"mode": "word", "sequence": 2, "input_enabled": True,
+                       "prediction": {"label": "hello", "confidence": .97},
+                       "signing_hand": None, "signing_hand_verified": False}
+        self.assertIsNone(candidate_from_result(left_result, selected_mode="word"))
+        left_labeled = {**left_result, "signing_hand": "Left",
+                        "signing_hand_verified": True}
+        self.assertIsNone(candidate_from_result(left_labeled, selected_mode="word"))
+        right_result = {**left_result, "signing_hand": "Right", "signing_hand_verified": True}
+        candidate = candidate_from_result(right_result, selected_mode="word")
+        self.assertEqual(candidate.label, "hello")
+        text = TextAccumulator()
+        self.assertTrue(apply_candidate_action(text, candidate, "confirm"))
+        self.assertEqual(text.text, "HELLO")
+        text.clear()
+        self.assertFalse(apply_worker_commit(text, {
+            **left_labeled, "committed": "hello",
+        }, selected_mode="word"))
+        self.assertEqual(text.text, "")
+
+    def test_word_candidate_requires_right_identity_and_worker_verification(self):
+        base = {"mode": "word", "sequence": 2, "input_enabled": True,
+                "prediction": {"label": "hello", "confidence": .97}}
+        for extra in (
+            {"signing_hand": None, "signing_hand_verified": False},
+            {"signing_hand": "Left", "signing_hand_verified": True},
+            {"signing_hand": "Right", "signing_hand_verified": False},
+            {"signing_hand": "Right"},
+        ):
+            with self.subTest(extra=extra):
+                self.assertIsNone(candidate_from_result({**base, **extra},
+                                                        selected_mode="word"))
+
+    def test_left_controller_confirm_works_with_word_role_gate(self):
+        controller = ConfirmationController(.5)
+        candidate = PendingCandidate("word", "hello", .97, 2)
+        self.assertIsNone(controller.update("open_palm", 0, handedness_reliable=True,
+                                            candidate=candidate))
+        action = controller.update("open_palm", .51, handedness_reliable=True,
+                                   candidate=candidate)
+        self.assertEqual(action, "confirm")
+        text = TextAccumulator()
+        self.assertTrue(apply_candidate_action(text, candidate, action))
+        controller.begin_cooldown(.51)
+        self.assertTrue(controller.in_cooldown(1.0))
+        self.assertEqual(text.text, "HELLO")
 
     def test_invalid_or_missing_worker_results_are_ignored(self):
         text = TextAccumulator()

@@ -13,6 +13,10 @@ import numpy as np
 
 _HEADER = struct.Struct("!IIIII")  # sequence, width, height, byte count, accept flag
 MAX_FRAME_BYTES = 4096 * 2160 * 3
+HAND_IDENTITY_CONFIDENCE = 0.85
+HAND_OVERLAP_RATIO = 0.20
+MAX_CONTROLLER_OBSERVATION_GAP_SECONDS = 0.25
+CONTROLLER_COOLDOWN_SECONDS = 3.0
 
 
 def encode_frame(sequence: int, frame: np.ndarray, *, accept_input: bool = True) -> tuple[bytes, bytes]:
@@ -117,6 +121,209 @@ class TextAccumulator:
         self._last_kind = None
 
 
+@dataclass(frozen=True)
+class PendingCandidate:
+    mode: str
+    label: str
+    confidence: float
+    sequence: int
+
+
+class ConfirmationController:
+    """One-shot open-palm confirmation with cooldown and neutral re-arm."""
+
+    def __init__(self, hold_seconds: float = 0.3,
+                 cooldown_seconds: float = CONTROLLER_COOLDOWN_SECONDS):
+        if hold_seconds <= 0:
+            raise ValueError("hold_seconds must be positive")
+        if cooldown_seconds < 0:
+            raise ValueError("cooldown_seconds cannot be negative")
+        self.hold_seconds = hold_seconds
+        self.cooldown_seconds = cooldown_seconds
+        self._gesture: str | None = None
+        self._started_at: float | None = None
+        self._readiness_started_at: float | None = None
+        self._phase = "armed"
+        self._cooldown_until: float | None = None
+        self._candidate_key: tuple[str, str] | None = None
+        self._last_observation_sequence: int | None = None
+        self._last_observation_time: float | None = None
+
+    @property
+    def state(self) -> str:
+        if self._phase == "cooldown":
+            return "cooldown"
+        if self._phase == "wait_neutral":
+            return "waiting for release"
+        return "holding open palm" if self._started_at is not None else "ready"
+
+    def cooldown_remaining(self, now: float) -> float:
+        if self._cooldown_until is None:
+            return 0.0
+        return max(0.0, self._cooldown_until - now)
+
+    def in_cooldown(self, now: float) -> bool:
+        return self.cooldown_remaining(now) > 0
+
+    def begin_cooldown(self, now: float) -> None:
+        self._cooldown_until = now + self.cooldown_seconds
+        self._phase = "cooldown"
+        self._gesture = None
+        self._started_at = None
+        self._readiness_started_at = None
+        self._last_observation_sequence = None
+        self._last_observation_time = None
+
+    def update(self, gesture: str | None, now: float, *, handedness_reliable: bool,
+               candidate: PendingCandidate | None,
+               observation_sequence: int | None = None) -> str | None:
+        if not handedness_reliable:
+            self._gesture = None
+            self._started_at = None
+            self._readiness_started_at = None
+            return None
+        if observation_sequence is not None:
+            if (self._last_observation_sequence is not None
+                    and observation_sequence <= self._last_observation_sequence):
+                return None
+            if (self._last_observation_time is not None
+                    and now - self._last_observation_time > MAX_CONTROLLER_OBSERVATION_GAP_SECONDS):
+                self._gesture = None
+                self._started_at = None
+                self._readiness_started_at = None
+            self._last_observation_sequence = observation_sequence
+            self._last_observation_time = now
+        if self._phase == "cooldown":
+            if self.in_cooldown(now):
+                return None
+            self._phase = "wait_neutral"
+        candidate_key = (candidate.mode, candidate.label) if candidate else None
+        if candidate_key != self._candidate_key:
+            self._candidate_key = candidate_key
+            self._gesture = None
+            self._started_at = None
+        if gesture == "neutral":
+            self._gesture = None
+            self._started_at = None
+            self._readiness_started_at = None
+            if self._phase == "wait_neutral":
+                self._phase = "armed"
+            return None
+        if self._phase == "wait_neutral":
+            return None
+        if gesture != "open_palm" or candidate is None:
+            self._gesture = None
+            self._started_at = None
+            return None
+        if gesture != self._gesture:
+            self._gesture = gesture
+            self._started_at = now
+            return None
+        if self._started_at is not None and now - self._started_at >= self.hold_seconds:
+            return "confirm"
+        return None
+
+    def reset(self) -> None:
+        self._gesture = None
+        self._started_at = None
+        self._phase = "armed"
+        self._cooldown_until = None
+        self._candidate_key = None
+        self._last_observation_sequence = None
+        self._last_observation_time = None
+        self._readiness_started_at = None
+
+
+def word_candidate_allowed(record: object) -> bool:
+    """Require the worker's verified anatomical-right Holistic hand result."""
+    return (isinstance(record, dict)
+            and record.get("mode") == "word"
+            and record.get("input_enabled") is True
+            and record.get("signing_hand") == "Right"
+            and record.get("signing_hand_verified") is True)
+
+
+def apply_candidate_action(text: TextAccumulator, candidate: PendingCandidate | None,
+                           action: str) -> bool:
+    """Commit the candidate once or discard it without changing committed text."""
+    if candidate is None or action not in ("confirm", "reject"):
+        return False
+    if action == "reject":
+        return True
+    try:
+        if candidate.mode == "word":
+            text.append_word(candidate.label)
+        elif candidate.mode == "alphabet":
+            text.append_letter(candidate.label)
+        else:
+            return False
+    except ValueError:
+        return False
+    return True
+
+
+def apply_candidate_key(text: TextAccumulator, candidate: PendingCandidate | None,
+                        raw_key: int) -> str | None:
+    """Keyboard fallback: +/= confirms, -/R rejects the pending candidate."""
+    if not isinstance(raw_key, int) or raw_key < 0:
+        return None
+    key = raw_key & 0xFF
+    action = "confirm" if key in (ord("+"), ord("=")) else (
+        "reject" if key in (ord("-"), ord("r"), ord("R")) else None)
+    if action is not None and apply_candidate_action(text, candidate, action):
+        return action
+    return None
+
+
+def candidate_from_result(record: object, *, selected_mode: str,
+                          minimum_sequence: int = 0) -> PendingCandidate | None:
+    if (not isinstance(record, dict) or record.get("mode") != selected_mode
+            or record.get("input_enabled") is not True):
+        return None
+    sequence = record.get("sequence")
+    prediction = record.get("prediction")
+    if (not isinstance(sequence, int) or isinstance(sequence, bool)
+            or sequence < minimum_sequence or not isinstance(prediction, dict)):
+        return None
+    label, confidence = prediction.get("label"), prediction.get("confidence")
+    if (not isinstance(label, str) or not label.strip()
+            or not isinstance(confidence, (int, float)) or not math.isfinite(confidence)
+            or not 0 <= confidence <= 1):
+        return None
+    if selected_mode == "word" and not word_candidate_allowed(record):
+        return None
+    if selected_mode == "alphabet" and (
+            record.get("signing_hand") != "Right"
+            or not isinstance(record.get("signing_hand_confidence"), (int, float))
+            or not math.isfinite(record["signing_hand_confidence"])
+            or record["signing_hand_confidence"] < 0.85):
+        return None
+    return PendingCandidate(selected_mode, label, float(confidence), sequence)
+
+
+def update_pending_candidate(current: PendingCandidate | None,
+                             incoming: PendingCandidate | None
+                             ) -> tuple[PendingCandidate | None, bool]:
+    """Keep pending input through neutral frames; ignore delayed older results."""
+    if incoming is None:
+        return current, False
+    if current is not None and incoming.sequence < current.sequence:
+        return current, False
+    changed = (current is None or current.mode != incoming.mode
+               or current.label != incoming.label)
+    return incoming, changed
+
+
+def candidate_outside_cooldown(candidate: PendingCandidate | None, *,
+                               controller: ConfirmationController, now: float,
+                               blocked_through_sequence: int) -> PendingCandidate | None:
+    """Drop candidates produced during cooldown, including delayed IPC results."""
+    if (candidate is None or controller.in_cooldown(now)
+            or candidate.sequence <= blocked_through_sequence):
+        return None
+    return candidate
+
+
 def apply_worker_commit(
     text: TextAccumulator, record: object, *, selected_mode: str,
     minimum_sequence: int = 0,
@@ -130,6 +337,8 @@ def apply_worker_commit(
     if not isinstance(record, dict) or record.get("input_enabled") is not True:
         return False
     if selected_mode not in ("word", "alphabet") or record.get("mode") != selected_mode:
+        return False
+    if selected_mode == "word" and not word_candidate_allowed(record):
         return False
     sequence = record.get("sequence")
     if (not isinstance(sequence, int) or isinstance(sequence, bool)
@@ -172,6 +381,8 @@ def presentation_fields(
     text: TextAccumulator,
     *,
     minimum_sequence: int = 0,
+    candidate: PendingCandidate | None = None,
+    candidate_status: str = "Pending",
 ) -> tuple[tuple[str, str], ...]:
     """Return the concise user-facing fields; keep worker diagnostics internal."""
     if mode not in ("word", "alphabet"):
@@ -219,6 +430,9 @@ def presentation_fields(
         ("Input mode", "WORD" if mode == "word" else "SPELL"),
         ("Word", prediction(latest_by_mode.get("word"))),
         ("Letter", prediction(latest_by_mode.get("alphabet"))),
+        ("Candidate", (f"{candidate.mode.upper()} {candidate.label.upper()} "
+                       f"{candidate.confidence:.1%} — {candidate_status}"
+                       if candidate else "(none)")),
         ("Status", status),
         ("Text", text.text or "(empty)"),
     )
@@ -246,9 +460,30 @@ def valid_worker_result(
             or not all(_valid_ranked_prediction(item, known_labels) for item in top)):
         return False
     committed = record.get("committed")
-    return (committed is None or
+    if not (committed is None or
             (isinstance(committed, str)
-             and (known_labels is None or committed in known_labels)))
+             and (known_labels is None or committed in known_labels))):
+        return False
+    if "controller_handedness" in record and type(record["controller_handedness"]) is not bool:
+        return False
+    if "controller_gesture" in record and record["controller_gesture"] not in (
+            None, "confirm", "open_palm", "neutral"):
+        return False
+    if "controller_sequence" in record and (
+            not isinstance(record["controller_sequence"], int)
+            or isinstance(record["controller_sequence"], bool)
+            or record["controller_sequence"] != record["sequence"]):
+        return False
+    if "signing_hand" in record and record["signing_hand"] not in (None, "Left", "Right"):
+        return False
+    if "signing_hand_verified" in record and type(record["signing_hand_verified"]) is not bool:
+        return False
+    if "signing_hand_confidence" in record and (
+            not isinstance(record["signing_hand_confidence"], (int, float))
+            or not math.isfinite(record["signing_hand_confidence"])
+            or not 0 <= record["signing_hand_confidence"] <= 1):
+        return False
+    return True
 
 
 def _valid_ranked_prediction(
