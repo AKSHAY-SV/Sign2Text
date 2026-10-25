@@ -366,6 +366,46 @@ def _draw_text(frame: np.ndarray, text: str, y: int, *, scale: float = 0.58,
                 color, thickness, cv2.LINE_AA)
 
 
+def queue_serial_text(target: Queue, value: str, previous: str | None) -> str:
+    """Queue the latest changed accumulated text; return the new baseline."""
+    if value == previous:
+        return previous
+    enqueue_latest(target, value)
+    return value
+
+
+def serial_output_worker(port: str, baud: int, target: Queue, stop: threading.Event,
+                        *, sender_factory=None, error_reporter=None) -> None:
+    """Open the UART sender and drain queued text updates off the UI thread."""
+    if error_reporter is None:
+        error_reporter = lambda message: print(message, file=sys.stderr, flush=True)
+    connection = None
+    try:
+        if sender_factory is None:
+            from tools.lpc2148_serial_sender import SerialTextSender
+            sender_factory = SerialTextSender
+        connection = sender_factory(port, baud)
+    except Exception as exc:
+        error_reporter(f"WARNING: LCD serial output unavailable on {port}: {exc}. "
+                       "Laptop recognition will continue without LCD output.")
+    if connection is not None:
+        while not stop.is_set() or not target.empty():
+            try:
+                value = target.get(timeout=0.1)
+            except Empty:
+                continue
+            try:
+                connection.send(value)
+            except Exception as exc:
+                error_reporter(f"WARNING: LCD serial output disconnected: {exc}")
+                break
+    try:
+        if connection is not None:
+            connection.close()
+    except Exception as exc:
+        error_reporter(f"WARNING: Could not close LCD serial connection: {exc}")
+
+
 def run(camera_index: int, initial_mode: str, *, controller_enabled: bool = CONTROLLER_ENABLED_DEFAULT,
         controller_hold_seconds: float = CONTROLLER_HOLD_SECONDS,
         controller_region=CONTROLLER_REGION, signing_region=SIGNING_REGION,
@@ -395,33 +435,19 @@ def run(camera_index: int, initial_mode: str, *, controller_enabled: bool = CONT
 
         text = TextAccumulator()
         if serial_port:
-            def serial_worker():
-                connection = None
-                try:
-                    from tools.lpc2148_serial_sender import SerialTextSender
-                    connection = SerialTextSender(serial_port, serial_baud)
-                except Exception as exc:
-                    print(f"LCD serial output disabled: {exc}", file=sys.stderr, flush=True)
-                    return
-                last = None
-                while not serial_stop.is_set() or not serial_queue.empty():
-                    try:
-                        value = serial_queue.get(timeout=0.1)
-                    except Empty:
-                        continue
-                    if value != last:
-                        try:
-                            connection.send(value)
-                            last = value
-                        except Exception as exc:
-                            print(f"LCD serial output disconnected: {exc}", file=sys.stderr, flush=True)
-                            break
-                if connection is not None:
-                    connection.close()
-            serial_thread = threading.Thread(target=serial_worker, name="lcd-serial", daemon=True)
+            serial_thread = threading.Thread(
+                target=serial_output_worker,
+                args=(serial_port, serial_baud, serial_queue, serial_stop),
+                name="lcd-serial", daemon=True,
+            )
             serial_thread.start()
-            print(f"Optional LCD serial output requested on {serial_port} at {serial_baud} baud", flush=True)
+            print(f"LCD serial output requested on {serial_port} at {serial_baud} baud", flush=True)
         last_serial_text = text.text
+
+        def queue_text_update():
+            nonlocal last_serial_text
+            if serial_port:
+                last_serial_text = queue_serial_text(serial_queue, text.text, last_serial_text)
         pending = None
         candidate_status = "Pending"
         controller = ConfirmationController(controller_hold_seconds)
@@ -530,6 +556,10 @@ def run(camera_index: int, initial_mode: str, *, controller_enabled: bool = CONT
                     controller_message = f"Debug: {controller_gesture}; pending, holding/release-gated"
                 controller_message += f" ({controller.state})"
 
+            # Commits happen above, before keyboard handling. Queue every visible
+            # accumulator change here so confirmed signs and edits share one path.
+            queue_text_update()
+
             display_width, display_height = _render_dimensions(frame, WINDOW, source_size)
             display = fit_camera_frame(frame, display_width, display_height)
             if controller_enabled:
@@ -627,21 +657,16 @@ def run(camera_index: int, initial_mode: str, *, controller_enabled: bool = CONT
                     controller.reset()
                 else:
                     apply_text_key(text, raw_key)
-            if text.text != last_serial_text:
-                last_serial_text = text.text
-                if serial_port:
-                    try:
-                        serial_queue.put_nowait(last_serial_text)
-                    except queue.Full:
-                        try:
-                            serial_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                        serial_queue.put_nowait(last_serial_text)
+            queue_text_update()
     finally:
         serial_stop.set()
         if serial_thread is not None:
-            serial_thread.join()
+            serial_thread.join(timeout=2.0)
+            # Serial writes are isolated from the UI. A device driver that stalls
+            # beyond the sender's write timeout must not prevent app shutdown.
+            if serial_thread.is_alive():
+                print("WARNING: LCD serial worker did not stop before shutdown timeout.",
+                      file=sys.stderr, flush=True)
         for worker in workers.values():
             worker.close()
         capture.release()

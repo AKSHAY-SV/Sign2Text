@@ -8,8 +8,13 @@ static char incoming[MESSAGE_CAPACITY + 1u];
 static unsigned int incoming_len = 0;
 
 static void display(const char *text) {
-    unsigned int i;
-    for (i = 0; i <= MESSAGE_CAPACITY; ++i) message[i] = text[i];
+    unsigned int i = 0;
+    while (i < MESSAGE_CAPACITY && text[i] != '\0') {
+        message[i] = text[i];
+        ++i;
+    }
+    while (i < MESSAGE_CAPACITY) message[i++] = '\0';
+    message[MESSAGE_CAPACITY] = '\0';
     lcd_show_message(message);
 }
 int main(void) {

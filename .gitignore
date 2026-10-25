@@ -16,3 +16,6 @@ __pycache__/
 
 # Local logs
 *.log
+
+# LPC2148 GCC build artifacts
+embedded/lpc2148_keil/build/

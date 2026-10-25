@@ -34,6 +34,21 @@ def test_line_protocol_and_consecutive_messages(monkeypatch, value):
     assert port.closed
 
 
+@pytest.mark.parametrize("length", [0, 1, 16, 17, 31, 32, 33, 80])
+def test_lcd_boundary_lengths_are_sent_as_one_ascii_line(monkeypatch, length):
+    sender, port = build_sender(monkeypatch)
+    message = "A" * length
+    assert sender.send(message)
+    assert port.writes == [message.encode("ascii") + b"\n"]
+
+
+def test_cr_lf_and_crlf_normalize_to_one_lf_line(monkeypatch):
+    sender, port = build_sender(monkeypatch)
+    for message in ("CR\r", "LF\n", "CRLF\r\n"):
+        assert sender.send(message)
+    assert port.writes == [b"CR\n", b"LF\n", b"CRLF\n"]
+
+
 def test_duplicate_suppression(monkeypatch):
     sender, port = build_sender(monkeypatch)
     assert sender.send("HELLO")
@@ -52,3 +67,15 @@ def test_unavailable_port_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "serial", types.SimpleNamespace(Serial=fail))
     with pytest.raises(OSError, match="unavailable"):
         SerialTextSender("missing")
+
+
+def test_write_failure_propagates_for_integration_worker_to_report(monkeypatch):
+    class BrokenPort(FakePort):
+        def write(self, data):
+            raise OSError("disconnected")
+
+    port = BrokenPort()
+    monkeypatch.setitem(sys.modules, "serial", types.SimpleNamespace(Serial=lambda *a, **k: port))
+    sender = SerialTextSender("fake")
+    with pytest.raises(OSError, match="disconnected"):
+        sender.send("HELLO")

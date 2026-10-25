@@ -40,12 +40,35 @@ void lcd_init(void) {
 void lcd_clear(void) { command(0x01); }
 void lcd_write_line(const char *text) {
     unsigned int i;
-    for (i = 0; i < 16; ++i) put_char(text[i] ? text[i] : ' ');
+    int ended = 0;
+    for (i = 0; i < 16; ++i) {
+        char c = ' ';
+        if (!ended) {
+            c = text[i];
+            if (c == '\0') { c = ' '; ended = 1; }
+        }
+        put_char(c);
+    }
 }
 void lcd_show_message(const char *text) {
     unsigned int i;
+    int ended = 0;
     command(0x80);
-    for (i = 0; i < 16; ++i) put_char(text[i] ? text[i] : ' ');
+    for (i = 0; i < 16; ++i) {
+        char c = ' ';
+        if (!ended) {
+            c = text[i];
+            if (c == '\0') { c = ' '; ended = 1; }
+        }
+        put_char(c);
+    }
     command(0xC0);
-    for (i = 16; i < 32; ++i) put_char(text[i] ? text[i] : ' ');
+    for (i = 16; i < 32; ++i) {
+        char c = ' ';
+        if (!ended) {
+            c = text[i];
+            if (c == '\0') { c = ' '; ended = 1; }
+        }
+        put_char(c);
+    }
 }

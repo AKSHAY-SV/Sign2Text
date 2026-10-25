@@ -41,6 +41,30 @@ API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
 ## 🚀 Usage
+
+### Integrated laptop and LPC2148 application
+
+From the repository root, start the camera, both existing recognizers, laptop
+text display, and (when connected) LCD output in one command:
+
+```sh
+python3 tools/run_sign2text_integrated.py --serial-port /dev/ttyUSB0
+```
+
+Replace `/dev/ttyUSB0` with the actual USB-serial device (for example
+`/dev/ttyACM0` or `COM4`). The LCD receiver uses UART0 at 9600 baud, 8N1, no
+flow control; Python defaults to the same baud. Use `--serial-baud` only when
+the firmware is configured to match. Without `--serial-port`, laptop
+recognition runs without hardware output. A missing/unavailable serial port
+prints a warning and leaves laptop recognition running.
+
+The firmware sources are in `embedded/lpc2148_keil`. Add them to the existing
+lab Keil project, set `UART0_PCLK_HZ` from the project's actual peripheral
+clock, build the HEX, and flash it once using the lab procedure before using
+LCD output. No Keil project or board verification is included in this
+repository. Check the detailed wiring and clock assumptions in
+[`embedded/lpc2148_keil/README.md`](embedded/lpc2148_keil/README.md).
+
 - Full pipeline
    To train your own model and reproduce the full workflow : Open and run `main_livefeed.ipynb`. This notebook contains all steps from start to finish:
    1.  Download the [Citizen ASL Dataset](https://www.microsoft.com/en-us/research/project/asl-citizen/)

@@ -2,6 +2,7 @@ import io
 import ast
 from pathlib import Path
 import threading
+import queue
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +19,70 @@ from sign2text.recognizers.words import StableWordText, WordReleaseGate
 
 
 class IntegratedProtocolTests(unittest.TestCase):
+    def test_serial_text_queue_sends_changed_full_text_and_keeps_latest(self):
+        from tools.run_sign2text_integrated import queue_serial_text
+        import queue
+
+        pending = queue.Queue(maxsize=1)
+        previous = ""
+        previous = queue_serial_text(pending, "HELLO", previous)
+        self.assertEqual(previous, "HELLO")
+        self.assertEqual(queue_serial_text(pending, "HELLO", previous), "HELLO")
+        previous = queue_serial_text(pending, "HELLO WORLD", previous)
+        self.assertEqual(pending.get_nowait(), "HELLO WORLD")
+        previous = queue_serial_text(pending, "HELLO WORL", previous)
+        previous = queue_serial_text(pending, "", previous)
+        self.assertEqual(pending.get_nowait(), "")
+        self.assertEqual(previous, "")
+
+    def test_serial_worker_lifecycle_sends_updates_and_closes_sender(self):
+        from tools.run_sign2text_integrated import serial_output_worker
+
+        events = []
+        messages = queue.Queue()
+        messages.put("HELLO")
+        stop = threading.Event()
+        class Sender:
+            def __init__(self, port, baud):
+                events.append(("open", port, baud))
+            def send(self, value):
+                events.append(("send", value))
+                stop.set()
+            def close(self):
+                events.append(("close",))
+        serial_output_worker("fake", 9600, messages, stop, sender_factory=Sender)
+        self.assertEqual(events, [("open", "fake", 9600), ("send", "HELLO"), ("close",)])
+
+    def test_serial_worker_closes_after_write_failure(self):
+        from tools.run_sign2text_integrated import serial_output_worker
+
+        messages = queue.Queue()
+        messages.put("HELLO")
+        stop = threading.Event()
+        events = []
+        class Sender:
+            def __init__(self, port, baud):
+                pass
+            def send(self, value):
+                raise OSError("disconnected")
+            def close(self):
+                events.append("closed")
+        serial_output_worker("fake", 9600, messages, stop, sender_factory=Sender,
+                             error_reporter=lambda message: events.append(message))
+        self.assertEqual(events, ["WARNING: LCD serial output disconnected: disconnected", "closed"])
+
+    def test_serial_worker_initialization_failure_returns_cleanly(self):
+        from tools.run_sign2text_integrated import serial_output_worker
+
+        events = []
+        def fail(*args):
+            raise OSError("port unavailable")
+        serial_output_worker("missing", 9600, queue.Queue(), threading.Event(),
+                             sender_factory=fail,
+                             error_reporter=lambda message: events.append(message))
+        self.assertEqual(len(events), 1)
+        self.assertIn("Laptop recognition will continue", events[0])
+
     def test_camera_frame_fits_window_with_letterboxing_and_aspect_ratio(self):
         from tools.run_sign2text_integrated import fit_camera_frame
 
