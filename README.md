@@ -1,92 +1,303 @@
-# ✊ Real-time Sign Language Translation with Citizen ASL Dataset 
+# Sign2Text — Real-Time Sign Language Recognition with ESP32 TFT
 
-This project implements a full pipeline to translate sign language into text using pose estimation, deep learning, and a large language model (LLM) for sentence refinement. The live translation system is built using the [Citizen ASL Dataset](https://www.microsoft.com/en-us/research/project/asl-citizen/) and runs in real time with a webcam.
+A real-time sign language recognition project that uses a laptop camera to recognize hand signs, displays recognition results on the laptop screen, and transmits the recognized text to an ESP32 over USB serial for display on an ILI9341 TFT LCD.
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=gJ-PRa88E-M">
-    <img src="demo/asldemo.gif" alt="Live ASL Translation Demo">
-  </a>
-</p>
-
-Watch a real-time demo of sign language translation using our trained model and the Citizen ASL dataset.
-> Disclaimer: Not a professional signer, the signing in this demo may not fully follow formal ASL grammar.
+The project combines computer vision, machine learning, Python-based inference, serial communication, and embedded display control.
 
 ## Features
-- Pose-based sign language recognition using MediaPipe Holistic
-- Normalization and preprocessing of landmark sequences
-- GRU-based model trained on 200 unique glosses (271 total classes including duplicates) (approx. 80% accuracy on validation)
-- Real-time webcam-based translation with LLM for sentence refinement (OpenAI GPT)
 
+- **Live camera input:** Captures video from the laptop camera.
+- **Sign recognition:** Processes camera frames using the available trained recognition models.
+- **Laptop display:** Shows the live camera feed and recognition results.
+- **ESP32 integration:** Sends recognized text from the Python application to the ESP32 through USB serial communication.
+- **TFT output:** Displays recognized text on an ILI9341-based 2.4-inch SPI TFT LCD (240 × 320).
+- **Multiple recognition modes:** Includes gloss-based recognition, word recognition, and alphabet/fingerspelling recognition launchers.
+- **Reusable firmware:** The ESP32 firmware remains flashed between sessions, so it does not need to be uploaded every time the application is launched.
 
-## Setup
+## System Architecture
 
-### Requirements
-Make sure to have Python 3.10.17 installed. You can use pyenv or another version manager to install and activate it.
-
-### Clone the repository
-```bash
-git clone https://github.com/tobp03/live-asl-translation.git
-cd live-asl-translation
+```text
+                ┌──────────────────────┐
+                │   Laptop Webcam      │
+                └──────────┬───────────┘
+                           │ Video Frames
+                           ▼
+                ┌──────────────────────┐
+                │  Python Application  │
+                │                      │
+                │  Image Processing    │
+                │  Landmark Extraction │
+                │  Model Inference     │
+                │  Text Prediction     │
+                └──────────┬───────────┘
+                           │
+                ┌──────────┴───────────┐
+                │                      │
+                ▼                      ▼
+      ┌──────────────────┐  ┌────────────────────┐
+      │  Laptop Display  │  │ USB Serial Output  │
+      │                  │  │                    │
+      │ Live Camera Feed │  │ Recognized Text    │
+      │ Predictions      │  │ Newline-Terminated │
+      └──────────────────┘  └─────────┬──────────┘
+                                      │ USB
+                                      ▼
+                            ┌────────────────────┐
+                            │       ESP32        │
+                            │ Serial Reception   │
+                            │ TFT_eSPI Rendering │
+                            └─────────┬──────────┘
+                                      │ SPI
+                                      ▼
+                            ┌────────────────────┐
+                            │  ILI9341 TFT LCD   │
+                            │                    │
+                            │ Recognized Text    │
+                            └────────────────────┘
 ```
-### Install Dependencies
-Once your done, in the correct environment:
-```bash
-pip install -r requirements.txt
+
+## Hardware Requirements
+
+- Laptop or computer running Linux
+- Webcam or compatible USB camera
+- ESP32 development board
+- 2.4-inch ILI9341 SPI TFT LCD, 240 × 320 resolution
+- USB cable for connecting the ESP32 to the laptop
+- Jumper wires for connecting the TFT to the ESP32
+
+## Software and Libraries
+
+The project uses the following technologies across its recognition and display pipeline:
+
+- Python
+- OpenCV for camera access and image processing
+- MediaPipe for hand/body landmark extraction where required by the selected recognition pipeline
+- TensorFlow/Keras for applicable trained models
+- PyTorch for applicable model pipelines
+- ONNX Runtime for the alphabet recognition pipeline
+- pyserial for communication between Python and the ESP32
+- TFT_eSPI for ESP32 TFT rendering
+- Arduino-compatible ESP32 firmware
+
+The dependencies required for each mode may differ.
+
+## Project Structure
+
+The repository contains the following launchers and project components:
+
+```text
+live-asl-translation/
+├── models/
+├── sign2text/
+├── tests/
+├── .venv/
+├── main_livefeed.ipynb
+├── test_tft_serial.py
+├── run_sign2text.sh
+├── run_sign2text_integrated.sh
+├── run_sign2text_py310.sh
+├── run_sign2text_words.sh
+├── run_sign2text_alphabet.sh
+└── README.md
 ```
 
-### Obtain API Key for LLM
-This project uses [OpenAI GPT API](https://platform.openai.com) for sentence refinement during live translation. You need a valid API key with billing enabled. Crete a file named `.env` in the project root and add the following line:
+Additional model files, configuration files, and supporting scripts may be present in the repository.
+
+## Installation and Setup
+
+### 1. Clone the Repository
+
 ```bash
-API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+git clone https://github.com/luvk1412/sign-language-translator.git
 ```
 
-## 🚀 Usage
+Alternatively, if you already have your project repository cloned, navigate directly to your local project directory.
 
-### Laptop application
+> **Note:** Use the GitHub URL of your actual project repository when cloning. The command above is an example repository URL from the related project exploration, not necessarily the remote for your current working directory.
 
-From the repository root, start the webcam-based word and alphabet recognizers
-with the laptop preview and text display:
+### 2. Navigate to the Project Directory
 
-```sh
+```bash
+cd ~/live-asl-translation
+```
+
+### 3. Activate the Python Virtual Environment
+
+```bash
+source .venv/bin/activate
+```
+
+The virtual environment keeps the project's Python dependencies separate from system-installed packages.
+
+If the environment has not been created or its dependencies have not been installed, follow the dependency instructions associated with the relevant recognition pipeline.
+
+### 4. Connect the Hardware
+
+1. Connect the TFT display to the ESP32 using the configured SPI pins.
+2. Connect the ESP32 to the laptop through USB.
+3. Confirm that the board is detected as a serial device, typically `/dev/ttyUSB0` in the current setup.
+4. Ensure the ESP32 has the serial receiver firmware uploaded.
+5. Close Arduino IDE Serial Monitor or any other program currently using the same serial port.
+
+## Running the Integrated Sign2Text Application
+
+This is the main workflow for running live recognition and displaying the output on both the laptop and TFT.
+
+Open a terminal and execute:
+
+```bash
+cd ~/live-asl-translation
+source .venv/bin/activate
 ./run_sign2text_integrated.sh
 ```
 
-Use `1` for WORD mode and `2` for SPELL mode. The standalone recognition
-commands remain available as `./run_sign2text_words.sh` and
-`./run_sign2text_alphabet.sh`.
+### What Happens When You Run It?
 
-ESP32 + ILI9341 TFT output is enabled by default by the integrated launcher.
-The laptop sends the accepted text buffer over `/dev/ttyUSB0` at 115200 baud;
-the ESP32 firmware should already be uploaded and listening for newline-ended
-UTF-8 messages. The sender uses a background worker, reports connection errors,
-and retries without stopping camera recognition. Disable serial output with
-`./run_sign2text_integrated.sh --no-tft`, or select another port/baud with
-`--tft-port` and `--tft-baud`. Text is sent when the accepted buffer changes,
-not on every prediction frame.
+1. The Python application starts.
+2. The laptop camera captures live video.
+3. The recognition pipeline processes the input.
+4. The recognized output is displayed on the laptop.
+5. Recognized text is sent over USB serial to the ESP32.
+6. The ESP32 receives the text and renders it on the TFT.
 
-- Full pipeline
-   To train your own model and reproduce the full workflow : Open and run `main_livefeed.ipynb`. This notebook contains all steps from start to finish:
-   1.  Download the [Citizen ASL Dataset](https://www.microsoft.com/en-us/research/project/asl-citizen/)
-   2.  Place the dataset folder in the same directory as `main_livefeed.ipynb` (the project root)
-   3.  Open and run the full pipeline step 1-3 on `main_livefeed.ipynb`
-   4.  Finally, use the trained model for live translation
-- Direct use with Pre-trained model
-  If you prefer to skip training
-  1. Ensure the pre-trained GRU model (`.keras`) is available in the `/models` folder (already provided)
-  2. Open `main_livefeed.ipynb`
-  3. Jump directly to **Step 4** to start live translation using the pre-trained model
-- Preprocessed data and model training is also available on [Kaggle](https://www.kaggle.com/code/tobypu/aslcitizen-top200-training). 
+**Important:** The ESP32 firmware normally only needs to be uploaded when it is first installed or when the firmware is changed. It does not need to be reflashed for every application run.
 
-## References
-- **ASL Citizen Dataset**  
-  Desai, A., Berger, L., Minakov, F. O., Milan, V., Singh, C., Pumphrey, K., Ladner, R. E., Daumé III, H., Lu, A. X., Caselli, N., & Bragg, D.  
-  *ASL Citizen: A Community-Sourced Dataset for Advancing Isolated Sign Language Recognition*.  
-  arXiv preprint arXiv:2304.05934, 2023. [[Paper](https://arxiv.org/abs/2304.05934)]
-  
-- **Keypoint Preprocessing** <br>
-  Roh, K., Lee, H., Hwang, E. J., Cho, S., & Park, J. C. (2024, May). Preprocessing Mediapipe Keypoints with Keypoint Reconstruction and Anchors for Isolated Sign Language Recognition. In *Proceedings of the LREC-COLING   2024 11th Workshop on the Representation and Processing of Sign Languages: Evaluation of Sign Language Resources* (pp. 323–334). [[Paper](https://aclanthology.org/2024.signlang-1.36.pdf)]
-  
-## Related Publication
-This project is related to the research paper:  
-Purbojo, T., & Wijaya, A. (2025). Enhancing Pose-Based Sign Language Recognition: A Comparative Study of Preprocessing Strategies with GRU and LSTM. *Advance Sustainable Science Engineering and Technology*, 7(2), 02502017-02502017. [[Paper](https://journal2.upgris.ac.id/index.php/asset/article/view/1658)]
+## Available Recognition Modes
+
+The repository contains launchers for multiple recognition pipelines.
+
+| Launcher | Purpose |
+|---|---|
+| `run_sign2text_integrated.sh` | Integrated live recognition with laptop and ESP32 TFT output |
+| `run_sign2text_py310.sh` | GRU-based gloss recognition pipeline |
+| `run_sign2text_words.sh` | LSTM-based word recognition pipeline |
+| `run_sign2text_alphabet.sh` | ONNX-based alphabet/fingerspelling recognition pipeline |
+| `run_sign2text.sh` | General Sign2Text launcher; behavior depends on its configuration |
+
+To run a standalone mode, navigate to the project directory, activate the appropriate environment, and execute its launcher. Some pipelines may require a different Python environment or dependency configuration.
+
+For the complete laptop-to-TFT experience, use `run_sign2text_integrated.sh`.
+
+## ESP32 and TFT Configuration
+
+The TFT uses the TFT_eSPI library. The working display configuration established for the current hardware is:
+
+```cpp
+#define ILI9341_DRIVER
+
+#define TFT_MISO 19
+#define TFT_MOSI 23
+#define TFT_SCLK 18
+#define TFT_CS   27
+#define TFT_DC   22
+#define TFT_RST  4
+```
+
+These settings belong in the TFT_eSPI user setup configuration used by the ESP32 firmware.
+
+The ESP32 firmware initializes the display, waits for serial input, and updates the display when it receives recognized text.
+
+The current setup uses:
+
+- **Display controller:** ILI9341
+- **Display resolution:** 240 × 320
+- **Communication:** SPI between ESP32 and TFT
+- **Laptop-to-ESP32 connection:** USB serial
+- **Serial baud rate:** 115200
+
+Do not change the pin configuration unless the physical wiring or hardware configuration is also changed.
+
+## Serial Communication
+
+The Python application communicates with the ESP32 through a serial connection.
+
+The current hardware setup uses:
+
+```text
+Device: /dev/ttyUSB0
+Baud rate: 115200
+Message format: UTF-8 text terminated by a newline
+```
+
+The ESP32 reads incoming text, removes surrounding whitespace, and updates the TFT when a non-empty message arrives.
+
+The file `test_tft_serial.py` is available as a serial communication test utility.
+
+## Troubleshooting
+
+### 1. Serial Port Is Busy
+
+**Symptom:** The Python application reports a serial connection error such as `Errno 16: Device or resource busy`.
+
+**Solution:**
+
+Close Arduino IDE Serial Monitor or any other application using `/dev/ttyUSB0`.
+
+To identify processes using the port:
+
+```bash
+sudo fuser -v /dev/ttyUSB0
+```
+
+Close the application that owns the port and launch the integrated application again.
+
+### 2. TFT Does Not Display Text
+
+Check the following:
+
+- The ESP32 is powered and connected.
+- The TFT wiring matches the configured pin definitions.
+- The TFT_eSPI setup uses the ILI9341 driver.
+- The ESP32 firmware is installed.
+- The Python application is sending newline-terminated messages to the correct serial device.
+
+### 3. Camera Does Not Open
+
+Check that the webcam is connected and available to the operating system.
+
+On Linux, camera devices commonly appear under `/dev/video*`. Close other applications that may be using the camera and try again.
+
+### 4. Model or Dependency Errors
+
+Confirm that the correct virtual environment is active and that the required model files exist.
+
+Some recognition pipelines use different frameworks and may require different Python versions or dependencies. Use the launcher appropriate for the model you intend to run.
+
+### 5. Application Stops or Closes
+
+Check the terminal output for Python errors, model-loading failures, camera initialization errors, or serial connection problems.
+
+Use the integrated launcher for the complete laptop-to-TFT workflow.
+
+## Development and Testing
+
+The project has been tested across several parts of the recognition pipeline, including model loading, prediction distribution generation, camera capture, landmark extraction, and serial communication.
+
+The ESP32/TFT display was also tested independently before being integrated with live recognition.
+
+The following files may be useful during development:
+
+- `test_tft_serial.py` — tests sending text from Python to the TFT through the ESP32.
+- `tests/` — contains project tests.
+- `main_livefeed.ipynb` — notebook for live-feed experimentation.
+
+## Future Improvements
+
+Potential extensions include:
+
+- Better formatting of longer recognized sentences on the TFT.
+- Automatic line wrapping and scrolling.
+- Improved recognition stability and confidence handling.
+- Better handling of mirrored camera input.
+- Integration with additional embedded hardware.
+- Further optimization of model inference and camera performance.
+
+## License
+
+Add the appropriate license for this repository if you intend to distribute or reuse the project publicly.
+
+## Acknowledgements
+
+This project combines computer vision, machine learning, embedded systems, and hardware integration to explore real-time sign language recognition and text display.
+
 
