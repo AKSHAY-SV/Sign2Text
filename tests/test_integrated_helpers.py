@@ -19,69 +19,26 @@ from sign2text.recognizers.words import StableWordText, WordReleaseGate
 
 
 class IntegratedProtocolTests(unittest.TestCase):
-    def test_serial_text_queue_sends_changed_full_text_and_keeps_latest(self):
-        from tools.run_sign2text_integrated import queue_serial_text
-        import queue
+    def test_integrated_entry_point_accepts_tft_options(self):
+        from tools.run_sign2text_integrated import main
 
-        pending = queue.Queue(maxsize=1)
-        previous = ""
-        previous = queue_serial_text(pending, "HELLO", previous)
-        self.assertEqual(previous, "HELLO")
-        self.assertEqual(queue_serial_text(pending, "HELLO", previous), "HELLO")
-        previous = queue_serial_text(pending, "HELLO WORLD", previous)
-        self.assertEqual(pending.get_nowait(), "HELLO WORLD")
-        previous = queue_serial_text(pending, "HELLO WORL", previous)
-        previous = queue_serial_text(pending, "", previous)
-        self.assertEqual(pending.get_nowait(), "")
-        self.assertEqual(previous, "")
+        with patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit) as error:
+                main(["--unsupported-serial-port", "unused"])
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("unrecognized arguments", stderr.getvalue())
+        self.assertEqual(stderr.getvalue().count("--tft-port"), 1)
+        self.assertEqual(stderr.getvalue().count("--no-tft"), 1)
 
-    def test_serial_worker_lifecycle_sends_updates_and_closes_sender(self):
-        from tools.run_sign2text_integrated import serial_output_worker
+    def test_integrated_cli_defaults_to_esp32_and_can_disable_tft(self):
+        from tools.run_sign2text_integrated import main
 
-        events = []
-        messages = queue.Queue()
-        messages.put("HELLO")
-        stop = threading.Event()
-        class Sender:
-            def __init__(self, port, baud):
-                events.append(("open", port, baud))
-            def send(self, value):
-                events.append(("send", value))
-                stop.set()
-            def close(self):
-                events.append(("close",))
-        serial_output_worker("fake", 9600, messages, stop, sender_factory=Sender)
-        self.assertEqual(events, [("open", "fake", 9600), ("send", "HELLO"), ("close",)])
-
-    def test_serial_worker_closes_after_write_failure(self):
-        from tools.run_sign2text_integrated import serial_output_worker
-
-        messages = queue.Queue()
-        messages.put("HELLO")
-        stop = threading.Event()
-        events = []
-        class Sender:
-            def __init__(self, port, baud):
-                pass
-            def send(self, value):
-                raise OSError("disconnected")
-            def close(self):
-                events.append("closed")
-        serial_output_worker("fake", 9600, messages, stop, sender_factory=Sender,
-                             error_reporter=lambda message: events.append(message))
-        self.assertEqual(events, ["WARNING: LCD serial output disconnected: disconnected", "closed"])
-
-    def test_serial_worker_initialization_failure_returns_cleanly(self):
-        from tools.run_sign2text_integrated import serial_output_worker
-
-        events = []
-        def fail(*args):
-            raise OSError("port unavailable")
-        serial_output_worker("missing", 9600, queue.Queue(), threading.Event(),
-                             sender_factory=fail,
-                             error_reporter=lambda message: events.append(message))
-        self.assertEqual(len(events), 1)
-        self.assertIn("Laptop recognition will continue", events[0])
+        with patch("tools.run_sign2text_integrated.run", return_value=0) as run:
+            self.assertEqual(main([]), 0)
+            self.assertEqual(run.call_args.kwargs["arduino_port"], "/dev/ttyUSB0")
+            self.assertEqual(run.call_args.kwargs["arduino_baud"], 115200)
+            self.assertEqual(main(["--no-tft"]), 0)
+            self.assertIsNone(run.call_args.kwargs["arduino_port"])
 
     def test_camera_frame_fits_window_with_letterboxing_and_aspect_ratio(self):
         from tools.run_sign2text_integrated import fit_camera_frame

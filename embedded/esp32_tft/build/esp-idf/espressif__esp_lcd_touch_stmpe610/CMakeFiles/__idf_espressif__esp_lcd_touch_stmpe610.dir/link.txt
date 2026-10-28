@@ -1,0 +1,2 @@
+/home/akshay-sv/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-ar qc libespressif__esp_lcd_touch_stmpe610.a CMakeFiles/__idf_espressif__esp_lcd_touch_stmpe610.dir/esp_lcd_touch_stmpe610.c.obj
+/home/akshay-sv/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-ranlib libespressif__esp_lcd_touch_stmpe610.a

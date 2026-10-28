@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/CMakeFiles/bootloader
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/CMakeFiles/bootloader.rule
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/CMakeFiles/bootloader-complete.rule
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule

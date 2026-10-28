@@ -1,0 +1,79 @@
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:79:25: error: 'DISPLAY_BUF_SIZE' undeclared here (not in a function)
+   79 | static char display_buf[DISPLAY_BUF_SIZE] = {0};
+      |                         ^~~~~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:92:32: error: initialization of 'lv_mutex_t' {aka 'int'} from 'void *' makes integer from pointer without a cast [-Wint-conversion]
+   92 | static lv_mutex_t lvgl_mutex = NULL;
+      |                                ^~~~
+In file included from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/esp_intr_alloc.h:12,
+                 from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/esp_cpu.h:20,
+                 from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/spinlock.h:11,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/include/freertos/portmacro.h:49,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/include/freertos/portable.h:57,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/include/freertos/FreeRTOS.h:69,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:12:
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'app_main':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:117:21: error: implicit declaration of function 'uart_set_config'; did you mean 'uart_intr_config'? [-Wimplicit-function-declaration]
+  117 |     ESP_ERROR_CHECK(uart_set_config(UART_PORT, &uart_config));
+      |                     ^~~~~~~~~~~~~~~
+/home/akshay-sv/esp/esp-idf/components/esp_common/include/esp_err.h:116:30: note: in definition of macro 'ESP_ERROR_CHECK'
+  116 |         esp_err_t err_rc_ = (x);                                        \
+      |                              ^
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'example_lvgl_init':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:187:18: error: implicit declaration of function 'lv_mutex_create'; did you mean 'lv_msgbox_create'? [-Wimplicit-function-declaration]
+  187 |     lvgl_mutex = lv_mutex_create();
+      |                  ^~~~~~~~~~~~~~~
+      |                  lv_msgbox_create
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:205:38: error: 'example_lvgl_flush_cb' undeclared (first use in this function)
+  205 |     lv_display_set_flush_cb(display, example_lvgl_flush_cb);
+      |                                      ^~~~~~~~~~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:205:38: note: each undeclared identifier is reported only once for each function it appears in
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'example_draw_text':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:240:19: error: passing argument 1 of 'lv_mutex_lock' makes pointer from integer without a cast [-Wint-conversion]
+  240 |     lv_mutex_lock(lvgl_api_lock);
+      |                   ^~~~~~~~~~~~~
+      |                   |
+      |                   lv_mutex_t {aka int}
+In file included from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/../misc/../font/../misc/cache/lv_cache_entry.h:16,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/../misc/../font/../misc/cache/lv_cache.h:16,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/../misc/../font/lv_font.h:22,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/../misc/lv_style.h:16,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/lv_obj.h:19,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/lvgl.h:39,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:23:
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/../misc/../font/../misc/cache/../../osal/lv_os.h:97:40: note: expected 'lv_mutex_t *' {aka 'int *'} but argument is of type 'lv_mutex_t' {aka 'int'}
+   97 | lv_result_t lv_mutex_lock(lv_mutex_t * mutex);
+      |                           ~~~~~~~~~~~~~^~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:249:26: error: implicit declaration of function 'lv_display_get_active'; did you mean 'lv_display_get_buf_active'? [-Wimplicit-function-declaration]
+  249 |     lv_display_t *disp = lv_display_get_active();
+      |                          ^~~~~~~~~~~~~~~~~~~~~
+      |                          lv_display_get_buf_active
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:249:26: error: initialization of 'lv_display_t *' from 'int' makes pointer from integer without a cast [-Wint-conversion]
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:251:9: error: implicit declaration of function 'lv_display_fill_area'; did you mean 'lv_display_rotate_area'? [-Wimplicit-function-declaration]
+  251 |         lv_display_fill_area(disp, &full_area, lv_color(255, 255, 255));
+      |         ^~~~~~~~~~~~~~~~~~~~
+      |         lv_display_rotate_area
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:251:48: error: implicit declaration of function 'lv_color'; did you mean 'lv_color_eq'? [-Wimplicit-function-declaration]
+  251 |         lv_display_fill_area(disp, &full_area, lv_color(255, 255, 255));
+      |                                                ^~~~~~~~
+      |                                                lv_color_eq
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:262:21: error: passing argument 1 of 'lv_mutex_unlock' makes pointer from integer without a cast [-Wint-conversion]
+  262 |     lv_mutex_unlock(lvgl_api_lock);
+      |                     ^~~~~~~~~~~~~
+      |                     |
+      |                     lv_mutex_t {aka int}
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/../misc/../font/../misc/cache/../../osal/lv_os.h:111:42: note: expected 'lv_mutex_t *' {aka 'int *'} but argument is of type 'lv_mutex_t' {aka 'int'}
+  111 | lv_result_t lv_mutex_unlock(lv_mutex_t * mutex);
+      |                             ~~~~~~~~~~~~~^~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: At top level:
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:96:13: warning: 'example_notify_lvgl_flush_ready' declared 'static' but never defined [-Wunused-function]
+   96 | static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx);
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:218:13: warning: 'example_lvgl_flush_cb' defined but not used [-Wunused-function]
+  218 | static void example_lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
+      |             ^~~~~~~~~~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:79:13: warning: 'display_buf' defined but not used [-Wunused-variable]
+   79 | static char display_buf[DISPLAY_BUF_SIZE] = {0};
+      |             ^~~~~~~~~~~
+make[2]: *** [esp-idf/main/CMakeFiles/__idf_main.dir/build.make:76: esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj] Error 1
+make[1]: *** [CMakeFiles/Makefile2:5930: esp-idf/main/CMakeFiles/__idf_main.dir/all] Error 2
+make: *** [Makefile:136: all] Error 2

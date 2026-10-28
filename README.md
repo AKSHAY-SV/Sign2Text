@@ -42,28 +42,27 @@ API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 ## 🚀 Usage
 
-### Integrated laptop and LPC2148 application
+### Laptop application
 
-From the repository root, start the camera, both existing recognizers, laptop
-text display, and (when connected) LCD output in one command:
+From the repository root, start the webcam-based word and alphabet recognizers
+with the laptop preview and text display:
 
 ```sh
-python3 tools/run_sign2text_integrated.py --serial-port /dev/ttyUSB0
+./run_sign2text_integrated.sh
 ```
 
-Replace `/dev/ttyUSB0` with the actual USB-serial device (for example
-`/dev/ttyACM0` or `COM4`). The LCD receiver uses UART0 at 9600 baud, 8N1, no
-flow control; Python defaults to the same baud. Use `--serial-baud` only when
-the firmware is configured to match. Without `--serial-port`, laptop
-recognition runs without hardware output. A missing/unavailable serial port
-prints a warning and leaves laptop recognition running.
+Use `1` for WORD mode and `2` for SPELL mode. The standalone recognition
+commands remain available as `./run_sign2text_words.sh` and
+`./run_sign2text_alphabet.sh`.
 
-The firmware sources are in `embedded/lpc2148_keil`. Add them to the existing
-lab Keil project, set `UART0_PCLK_HZ` from the project's actual peripheral
-clock, build the HEX, and flash it once using the lab procedure before using
-LCD output. No Keil project or board verification is included in this
-repository. Check the detailed wiring and clock assumptions in
-[`embedded/lpc2148_keil/README.md`](embedded/lpc2148_keil/README.md).
+ESP32 + ILI9341 TFT output is enabled by default by the integrated launcher.
+The laptop sends the accepted text buffer over `/dev/ttyUSB0` at 115200 baud;
+the ESP32 firmware should already be uploaded and listening for newline-ended
+UTF-8 messages. The sender uses a background worker, reports connection errors,
+and retries without stopping camera recognition. Disable serial output with
+`./run_sign2text_integrated.sh --no-tft`, or select another port/baud with
+`--tft-port` and `--tft-baud`. Text is sent when the accepted buffer changes,
+not on every prediction frame.
 
 - Full pipeline
    To train your own model and reproduce the full workflow : Open and run `main_livefeed.ipynb`. This notebook contains all steps from start to finish:

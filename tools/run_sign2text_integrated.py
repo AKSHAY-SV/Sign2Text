@@ -29,6 +29,7 @@ from sign2text.integrated import (
     update_pending_candidate,
     switch_input_mode, valid_worker_result,
 )
+from tools.arduino_serial_sender import ArduinoTextSender
 from sign2text.recognizers.alphabet.adapter import DEFAULT_REPOSITORY as ALPHABET_REPOSITORY
 from sign2text.recognizers.words.adapter import DEFAULT_REPOSITORY as WORD_REPOSITORY
 
@@ -366,57 +367,19 @@ def _draw_text(frame: np.ndarray, text: str, y: int, *, scale: float = 0.58,
                 color, thickness, cv2.LINE_AA)
 
 
-def queue_serial_text(target: Queue, value: str, previous: str | None) -> str:
-    """Queue the latest changed accumulated text; return the new baseline."""
-    if value == previous:
-        return previous
-    enqueue_latest(target, value)
-    return value
-
-
-def serial_output_worker(port: str, baud: int, target: Queue, stop: threading.Event,
-                        *, sender_factory=None, error_reporter=None) -> None:
-    """Open the UART sender and drain queued text updates off the UI thread."""
-    if error_reporter is None:
-        error_reporter = lambda message: print(message, file=sys.stderr, flush=True)
-    connection = None
-    try:
-        if sender_factory is None:
-            from tools.lpc2148_serial_sender import SerialTextSender
-            sender_factory = SerialTextSender
-        connection = sender_factory(port, baud)
-    except Exception as exc:
-        error_reporter(f"WARNING: LCD serial output unavailable on {port}: {exc}. "
-                       "Laptop recognition will continue without LCD output.")
-    if connection is not None:
-        while not stop.is_set() or not target.empty():
-            try:
-                value = target.get(timeout=0.1)
-            except Empty:
-                continue
-            try:
-                connection.send(value)
-            except Exception as exc:
-                error_reporter(f"WARNING: LCD serial output disconnected: {exc}")
-                break
-    try:
-        if connection is not None:
-            connection.close()
-    except Exception as exc:
-        error_reporter(f"WARNING: Could not close LCD serial connection: {exc}")
-
-
 def run(camera_index: int, initial_mode: str, *, controller_enabled: bool = CONTROLLER_ENABLED_DEFAULT,
         controller_hold_seconds: float = CONTROLLER_HOLD_SECONDS,
         controller_region=CONTROLLER_REGION, signing_region=SIGNING_REGION,
-        debug_controller: bool = False, serial_port: str | None = None,
-        serial_baud: int = 9600) -> int:
+        debug_controller: bool = False, arduino_port: str | None = "/dev/ttyUSB0",
+        arduino_baud: int = 115200) -> int:
     capture = cv2.VideoCapture(camera_index)
     workers: dict[str, InferenceWorker] = {}
-    sender = None
-    serial_queue: Queue = Queue(maxsize=1)
-    serial_stop = threading.Event()
-    serial_thread = None
+    sender = ArduinoTextSender(arduino_port, arduino_baud) if arduino_port else None
+    if sender:
+        print(f"TFT serial output enabled: {arduino_port} at {arduino_baud} baud",
+              flush=True)
+    else:
+        print("TFT serial output disabled", flush=True)
     try:
         if not capture.isOpened():
             raise RuntimeError(f"Could not open webcam device {camera_index}.")
@@ -434,20 +397,14 @@ def run(camera_index: int, initial_mode: str, *, controller_enabled: bool = CONT
         cv2.resizeWindow(WINDOW, *source_size)
 
         text = TextAccumulator()
-        if serial_port:
-            serial_thread = threading.Thread(
-                target=serial_output_worker,
-                args=(serial_port, serial_baud, serial_queue, serial_stop),
-                name="lcd-serial", daemon=True,
-            )
-            serial_thread.start()
-            print(f"LCD serial output requested on {serial_port} at {serial_baud} baud", flush=True)
-        last_serial_text = text.text
+        last_queued_text = None
 
-        def queue_text_update():
-            nonlocal last_serial_text
-            if serial_port:
-                last_serial_text = queue_serial_text(serial_queue, text.text, last_serial_text)
+        def queue_text_update() -> None:
+            nonlocal last_queued_text
+            if text.text != last_queued_text:
+                last_queued_text = text.text
+                if sender:
+                    sender.offer(text.text)
         pending = None
         candidate_status = "Pending"
         controller = ConfirmationController(controller_hold_seconds)
@@ -657,26 +614,25 @@ def run(camera_index: int, initial_mode: str, *, controller_enabled: bool = CONT
                     controller.reset()
                 else:
                     apply_text_key(text, raw_key)
-            queue_text_update()
     finally:
-        serial_stop.set()
-        if serial_thread is not None:
-            serial_thread.join(timeout=2.0)
-            # Serial writes are isolated from the UI. A device driver that stalls
-            # beyond the sender's write timeout must not prevent app shutdown.
-            if serial_thread.is_alive():
-                print("WARNING: LCD serial worker did not stop before shutdown timeout.",
-                      file=sys.stderr, flush=True)
         for worker in workers.values():
             worker.close()
         capture.release()
         cv2.destroyAllWindows()
+        if sender:
+            sender.close()
     return 0
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--camera", type=int, default=0)
+    parser.add_argument("--tft-port", "--arduino-port", dest="tft_port", default="/dev/ttyUSB0",
+                        help="ESP32 serial port (default: /dev/ttyUSB0)")
+    parser.add_argument("--tft-baud", "--arduino-baud", dest="tft_baud", type=int,
+                        default=115200, help="TFT serial baud rate (default: 115200)")
+    parser.add_argument("--no-tft", action="store_true",
+                        help="run recognition without sending text to the ESP32")
     parser.add_argument("--mode", choices=("word", "spell", "alphabet"), default="word",
                         help="input mode to accept; switch with 1/2 (alphabet is a SPELL alias)")
     parser.add_argument("--no-left-controller", action="store_true",
@@ -691,8 +647,6 @@ def main(argv=None) -> int:
                         help="normalized right-signing region in mirrored preview")
     parser.add_argument("--debug-controller", action="store_true",
                         help="show temporary hand and controller diagnostics")
-    parser.add_argument("--serial-port", help="optional LPC2148 LCD UART port")
-    parser.add_argument("--serial-baud", type=int, default=9600)
     args = parser.parse_args(argv)
     try:
         mode = "alphabet" if args.mode in ("spell", "alphabet") else "word"
@@ -701,7 +655,8 @@ def main(argv=None) -> int:
                    controller_region=tuple(args.controller_region),
                    signing_region=tuple(args.signing_region),
                    debug_controller=args.debug_controller,
-                   serial_port=args.serial_port, serial_baud=args.serial_baud)
+                   arduino_port=None if args.no_tft else args.tft_port,
+                   arduino_baud=args.tft_baud)
     except Exception as exc:
         print(f"Sign2Text could not continue: {exc}", file=sys.stderr)
         return 1

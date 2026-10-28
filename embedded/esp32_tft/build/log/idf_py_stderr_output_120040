@@ -1,0 +1,62 @@
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:76:25: error: 'DISPLAY_BUF_SIZE' undeclared here (not in a function)
+   76 | static char display_buf[DISPLAY_BUF_SIZE] = {0};
+      |                         ^~~~~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:89:32: error: initialization of 'lv_mutex_t' {aka 'int'} from 'void *' makes integer from pointer without a cast [-Wint-conversion]
+   89 | static lv_mutex_t lvgl_mutex = NULL;
+      |                                ^~~~
+In file included from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/esp_intr_alloc.h:12,
+                 from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/esp_cpu.h:20,
+                 from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/spinlock.h:11,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/include/freertos/portmacro.h:49,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/include/freertos/portable.h:57,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/include/freertos/FreeRTOS.h:69,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:12:
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'app_main':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:114:21: error: implicit declaration of function 'uart_set_config'; did you mean 'uart_intr_config'? [-Wimplicit-function-declaration]
+  114 |     ESP_ERROR_CHECK(uart_set_config(UART_PORT, &uart_config));
+      |                     ^~~~~~~~~~~~~~~
+/home/akshay-sv/esp/esp-idf/components/esp_common/include/esp_err.h:116:30: note: in definition of macro 'ESP_ERROR_CHECK'
+  116 |         esp_err_t err_rc_ = (x);                                        \
+      |                              ^
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'example_lvgl_init':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:184:18: error: implicit declaration of function 'lv_mutex_create'; did you mean 'lv_msgbox_create'? [-Wimplicit-function-declaration]
+  184 |     lvgl_mutex = lv_mutex_create();
+      |                  ^~~~~~~~~~~~~~~
+      |                  lv_msgbox_create
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:202:38: error: passing argument 2 of 'lv_display_set_flush_cb' from incompatible pointer type [-Wincompatible-pointer-types]
+  202 |     lv_display_set_flush_cb(display, example_notify_lvgl_flush_ready);
+      |                                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                      |
+      |                                      _Bool (*)(struct esp_lcd_panel_io_t *, esp_lcd_panel_io_event_data_t *, void *)
+In file included from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/lv_obj_tree.h:18,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/lv_obj.h:24,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/lvgl.h:39,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:23:
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/core/../display/lv_display.h:264:73: note: expected 'lv_display_flush_cb_t' {aka 'void (*)(lv_display_t *, const lv_area_t *, unsigned char *)'} but argument is of type '_Bool (*)(struct esp_lcd_panel_io_t *, esp_lcd_panel_io_event_data_t *, void *)'
+  264 | void lv_display_set_flush_cb(lv_display_t * disp, lv_display_flush_cb_t flush_cb);
+      |                                                   ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'example_draw_text':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:234:20: error: 'lvgl_api_lock' undeclared (first use in this function)
+  234 |     _lock_acquire(&lvgl_api_lock);
+      |                    ^~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:234:20: note: each undeclared identifier is reported only once for each function it appears in
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:243:26: error: implicit declaration of function 'lv_display_get_active'; did you mean 'lv_display_get_buf_active'? [-Wimplicit-function-declaration]
+  243 |     lv_display_t *disp = lv_display_get_active();
+      |                          ^~~~~~~~~~~~~~~~~~~~~
+      |                          lv_display_get_buf_active
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:243:26: error: initialization of 'lv_display_t *' from 'int' makes pointer from integer without a cast [-Wint-conversion]
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:245:9: error: implicit declaration of function 'lv_display_fill_area'; did you mean 'lv_display_rotate_area'? [-Wimplicit-function-declaration]
+  245 |         lv_display_fill_area(disp, &full_area, lv_color(255, 255, 255));
+      |         ^~~~~~~~~~~~~~~~~~~~
+      |         lv_display_rotate_area
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:245:48: error: implicit declaration of function 'lv_color'; did you mean 'lv_color_eq'? [-Wimplicit-function-declaration]
+  245 |         lv_display_fill_area(disp, &full_area, lv_color(255, 255, 255));
+      |                                                ^~~~~~~~
+      |                                                lv_color_eq
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: At top level:
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:76:13: warning: 'display_buf' defined but not used [-Wunused-variable]
+   76 | static char display_buf[DISPLAY_BUF_SIZE] = {0};
+      |             ^~~~~~~~~~~
+make[2]: *** [esp-idf/main/CMakeFiles/__idf_main.dir/build.make:76: esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj] Error 1
+make[1]: *** [CMakeFiles/Makefile2:5930: esp-idf/main/CMakeFiles/__idf_main.dir/all] Error 2
+make: *** [Makefile:136: all] Error 2

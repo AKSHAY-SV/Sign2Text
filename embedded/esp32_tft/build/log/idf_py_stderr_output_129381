@@ -1,0 +1,17 @@
+In file included from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/esp_intr_alloc.h:12,
+                 from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/esp_cpu.h:20,
+                 from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/spinlock.h:11,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/include/freertos/portmacro.h:49,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/include/freertos/portable.h:57,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/include/freertos/FreeRTOS.h:69,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:12:
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'app_main':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:108:21: error: implicit declaration of function 'uart_set_config'; did you mean 'uart_intr_config'? [-Wimplicit-function-declaration]
+  108 |     ESP_ERROR_CHECK(uart_set_config(UART_PORT, &uart_config));
+      |                     ^~~~~~~~~~~~~~~
+/home/akshay-sv/esp/esp-idf/components/esp_common/include/esp_err.h:116:30: note: in definition of macro 'ESP_ERROR_CHECK'
+  116 |         esp_err_t err_rc_ = (x);                                        \
+      |                              ^
+make[2]: *** [esp-idf/main/CMakeFiles/__idf_main.dir/build.make:76: esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj] Error 1
+make[1]: *** [CMakeFiles/Makefile2:5930: esp-idf/main/CMakeFiles/__idf_main.dir/all] Error 2
+make: *** [Makefile:136: all] Error 2

@@ -1,0 +1,43 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/CMakeFiles/bootloader"
+		},
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/CMakeFiles/bootloader.rule"
+		},
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/CMakeFiles/bootloader-complete.rule"
+		},
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule"
+		},
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule"
+		},
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule"
+		},
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule"
+		},
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule"
+		},
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule"
+		},
+		{
+			"file" : "/home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"bootloader"
+		],
+		"name" : "bootloader"
+	}
+}

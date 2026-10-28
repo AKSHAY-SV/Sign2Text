@@ -1,0 +1,2 @@
+source /home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/gdbinit/symbols
+source /home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/gdbinit/connect

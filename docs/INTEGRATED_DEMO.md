@@ -31,6 +31,21 @@ Run from the repository root:
 ./run_sign2text_integrated.sh
 ```
 
+The integrated launcher also sends changes to the accepted text buffer to an
+ESP32 over `/dev/ttyUSB0` at 115200 baud. The existing ESP32 firmware must be
+running and accept UTF-8 lines terminated with `\\n`. Serial writes happen on a
+background thread; an unavailable port is reported and retried while the
+recognition preview continues. The sender suppresses unchanged buffer values
+and bounds each line to 128 UTF-8 bytes. Disable TFT output with
+`./run_sign2text_integrated.sh --no-tft`; use `--tft-port PORT` or
+`--tft-baud BAUD` to override the defaults.
+
+Only confirmed/accepted words and letters are added to the displayed text
+buffer and sent. Pending live candidates are not transmitted. WORD mode appends
+the model's existing word labels; SPELL mode appends the model's existing
+letters. This launcher does not add sentence translation or change model
+inference.
+
 Controls: `1` WORD, `2` SPELL, `C` clear text, Backspace remove one character,
 Space add a separator, `Q` quit. Accepted words append as uppercase tokens;
 accepted letters concatenate. Switching from WORD to SPELL inserts one

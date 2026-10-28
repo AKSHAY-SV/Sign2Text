@@ -1,0 +1,7 @@
+esp-idf/lvgl__lvgl/CMakeFiles/__idf_lvgl__lvgl.dir/src/draw/nxp/vglite/lv_draw_vglite_triangle.c.obj: \
+ /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/draw/nxp/vglite/lv_draw_vglite_triangle.c \
+ /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/draw/nxp/vglite/lv_draw_vglite.h \
+ /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/draw/nxp/vglite/../../../lv_conf_internal.h \
+ /home/akshay-sv/live-asl-translation/embedded/esp32_tft/managed_components/lvgl__lvgl/src/draw/nxp/vglite/../../../lv_conf_kconfig.h \
+ /home/akshay-sv/live-asl-translation/embedded/esp32_tft/build/config/sdkconfig.h \
+ /home/akshay-sv/esp/esp-idf/components/esp_common/include/esp_attr.h

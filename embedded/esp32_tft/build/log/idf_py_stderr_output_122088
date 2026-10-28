@@ -1,0 +1,51 @@
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:79:25: error: 'DISPLAY_BUF_SIZE' undeclared here (not in a function)
+   79 | static char display_buf[DISPLAY_BUF_SIZE] = {0};
+      |                         ^~~~~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:92:32: error: initialization of 'lv_mutex_t' {aka 'int'} from 'void *' makes integer from pointer without a cast [-Wint-conversion]
+   92 | static lv_mutex_t lvgl_mutex = NULL;
+      |                                ^~~~
+In file included from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/esp_intr_alloc.h:12,
+                 from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/esp_cpu.h:20,
+                 from /home/akshay-sv/esp/esp-idf/components/esp_hw_support/include/spinlock.h:11,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/include/freertos/portmacro.h:49,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/include/freertos/portable.h:57,
+                 from /home/akshay-sv/esp/esp-idf/components/freertos/FreeRTOS-Kernel/include/freertos/FreeRTOS.h:69,
+                 from /home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:12:
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'app_main':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:117:21: error: implicit declaration of function 'uart_set_config'; did you mean 'uart_intr_config'? [-Wimplicit-function-declaration]
+  117 |     ESP_ERROR_CHECK(uart_set_config(UART_PORT, &uart_config));
+      |                     ^~~~~~~~~~~~~~~
+/home/akshay-sv/esp/esp-idf/components/esp_common/include/esp_err.h:116:30: note: in definition of macro 'ESP_ERROR_CHECK'
+  116 |         esp_err_t err_rc_ = (x);                                        \
+      |                              ^
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'example_lvgl_init':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:187:18: error: implicit declaration of function 'lv_mutex_create'; did you mean 'lv_msgbox_create'? [-Wimplicit-function-declaration]
+  187 |     lvgl_mutex = lv_mutex_create();
+      |                  ^~~~~~~~~~~~~~~
+      |                  lv_msgbox_create
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:205:38: error: 'example_lvgl_flush_cb' undeclared (first use in this function)
+  205 |     lv_display_set_flush_cb(display, example_lvgl_flush_cb);
+      |                                      ^~~~~~~~~~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:205:38: note: each undeclared identifier is reported only once for each function it appears in
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: In function 'example_draw_text':
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:252:9: error: implicit declaration of function 'lv_fill_rect'; did you mean 'lv_draw_rect'? [-Wimplicit-function-declaration]
+  252 |         lv_fill_rect(scr, &full_area, lv_color(255, 255, 255));
+      |         ^~~~~~~~~~~~
+      |         lv_draw_rect
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:252:39: error: implicit declaration of function 'lv_color'; did you mean 'lv_color_eq'? [-Wimplicit-function-declaration]
+  252 |         lv_fill_rect(scr, &full_area, lv_color(255, 255, 255));
+      |                                       ^~~~~~~~
+      |                                       lv_color_eq
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c: At top level:
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:96:13: warning: 'example_notify_lvgl_flush_ready' declared 'static' but never defined [-Wunused-function]
+   96 | static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx);
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:218:13: warning: 'example_lvgl_flush_cb' defined but not used [-Wunused-function]
+  218 | static void example_lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
+      |             ^~~~~~~~~~~~~~~~~~~~~
+/home/akshay-sv/live-asl-translation/embedded/esp32_tft/main/main.c:79:13: warning: 'display_buf' defined but not used [-Wunused-variable]
+   79 | static char display_buf[DISPLAY_BUF_SIZE] = {0};
+      |             ^~~~~~~~~~~
+make[2]: *** [esp-idf/main/CMakeFiles/__idf_main.dir/build.make:76: esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj] Error 1
+make[1]: *** [CMakeFiles/Makefile2:5930: esp-idf/main/CMakeFiles/__idf_main.dir/all] Error 2
+make: *** [Makefile:136: all] Error 2
